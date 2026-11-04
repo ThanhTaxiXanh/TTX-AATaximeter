@@ -1,7 +1,7 @@
 name: Flutter MVP Debug APK
 on:
   push:
-    branches: [main]
+    branches: [main, feature/flutter-taximeter-foundation]
   pull_request:
   workflow_dispatch:
 

@@ -580,7 +580,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     // Geolocator already runs a location-type Android foreground service.
     // Do not cancel it just because we leave while acquiring a GPS fix.
     // The watchdog suppresses untrusted billing; a valid fix may recover.
-    if (_gps == null) {
+    if (_gps == null && !_gpsStarting) {
       _suspendForGps('Dịch vụ GPS không hoạt động khi ra nền');
     }
   }
