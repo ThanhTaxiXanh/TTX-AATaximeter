@@ -1,17 +1,20 @@
 import 'package:flutter/material.dart';
 import '../data/trip_repository.dart';
+import '../domain/revenue_summary.dart';
 import '../domain/trip_record.dart';
 import '../payment/bank_book.dart';
+import 'trip_detail_page.dart';
 import 'trip_receipt_dialog.dart';
 
-String _cash(num n) => n.round().toString()
-  .replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => '.') + ' đ';
+String _cash(num value) => value.round().toString()
+  .replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',') + ' đ';
 
 class TripHistoryPage extends StatefulWidget {
   const TripHistoryPage({
     super.key, required this.repository,
     required this.bankBook, required this.onConfigureBank,
   });
+
   final TripRepository repository;
   final BankBook bankBook;
   final Future<BankBook?> Function() onConfigureBank;
@@ -22,20 +25,27 @@ class TripHistoryPage extends StatefulWidget {
 
 class _TripHistoryPageState extends State<TripHistoryPage> {
   List<TripRecord> _trips = [];
+  RevenuePeriod _period = RevenuePeriod.today;
   bool _loading = true;
 
   @override
-  void initState() { super.initState(); _load(); }
+  void initState() {
+    super.initState();
+    _load();
+  }
 
   Future<void> _load() async {
     try {
-      final result = await widget.repository.listTrips();
-      if (mounted) setState(() { _trips = result; _loading = false; });
-    } catch (e) {
+      final saved = await widget.repository.listTrips();
+      if (mounted) setState(() {
+        _trips = saved;
+        _loading = false;
+      });
+    } catch (error) {
       if (!mounted) return;
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Không đọc được lịch sử: ' + e.toString())));
+        SnackBar(content: Text('Không đọc được lịch sử: ' + error.toString())));
     }
   }
 
@@ -55,100 +65,239 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
 
   Future<void> _delete(TripRecord record) async {
     if (!await _confirm('Xóa chuyến đã chọn?')) return;
-    try { await widget.repository.delete(record.id); await _load(); }
-    catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Lỗi xóa chuyến: ' + e.toString())));
-    }
+    await widget.repository.delete(record.id);
+    await _load();
   }
 
   Future<void> _clear() async {
     if (!await _confirm('Xóa toàn bộ lịch sử?')) return;
-    try { await widget.repository.clearAll(); await _load(); }
-    catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Lỗi xóa lịch sử: ' + e.toString())));
-    }
+    await widget.repository.clearAll();
+    await _load();
   }
 
-  Future<void> _openReceipt(TripRecord r) async {
+  Future<void> _openReceipt(TripRecord record) async {
     final selected = await showDialog<PaymentMethod>(
-      context: context, builder: (ctx) => TripReceiptDialog(
-        record: r,
+      context: context,
+      builder: (ctx) => TripReceiptDialog(
+        record: record,
         bankBook: widget.bankBook,
         onConfigureBank: widget.onConfigureBank,
       ),
     );
     if (selected == null || !mounted) return;
-    try {
-      await widget.repository.save(r.copyWith(paymentMethod: selected));
-      await _load();
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Lỗi lưu phương thức: ' + e.toString())));
-    }
+    await widget.repository.save(record.copyWith(paymentMethod: selected));
+    await _load();
+  }
+
+  Widget _periodPicker() => Container(
+    decoration: BoxDecoration(
+      color: const Color(0xFF202023),
+      borderRadius: BorderRadius.circular(22),
+    ),
+    padding: const EdgeInsets.all(3),
+    child: Row(children: [
+      for (final period in RevenuePeriod.values)
+        Expanded(child: InkWell(
+          onTap: () => setState(() => _period = period),
+          borderRadius: BorderRadius.circular(20),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.symmetric(vertical: 11),
+            decoration: BoxDecoration(
+              color: _period == period
+                  ? const Color(0xFF5B5B61) : Colors.transparent,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              switch (period) {
+                RevenuePeriod.today => 'Hôm nay',
+                RevenuePeriod.week => 'Tuần này',
+                RevenuePeriod.month => 'Tháng này',
+                RevenuePeriod.all => 'Tất cả',
+              },
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12,
+                fontWeight: FontWeight.w600),
+            ),
+          ),
+        )),
+    ]),
+  );
+
+  Widget _statCard(IconData icon, Color color, String value, String label) =>
+      Container(
+        height: 135,
+        padding: const EdgeInsets.all(15),
+        decoration: BoxDecoration(
+          color: const Color(0xFF202023),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: color, size: 24),
+            const Spacer(),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(value,
+                style: const TextStyle(fontSize: 25,
+                  color: Colors.white, fontWeight: FontWeight.w800)),
+            ),
+            const SizedBox(height: 6),
+            Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white60,
+                fontSize: 12)),
+          ],
+        ),
+      );
+
+  Widget _tripTile(TripRecord trip) {
+    final r = trip.receipt;
+    final title = trip.fareProfileName.isNotEmpty
+        ? trip.fareProfileName : 'Xe taxi';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF202023),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => Navigator.push(context, MaterialPageRoute<void>(
+          builder: (_) => TripDetailPage(
+            record: trip,
+            onReceipt: () => _openReceipt(trip),
+          ),
+        )).then((_) { if (mounted) _load(); }),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 15, 8, 15),
+          child: Row(children: [
+            const Icon(Icons.local_taxi,
+              size: 37, color: Color(0xFF168FFF)),
+            const SizedBox(width: 12),
+            Expanded(child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 16,
+                    fontWeight: FontWeight.w700)),
+                const SizedBox(height: 4),
+                Text(formatTripDate(r.startedAt),
+                  maxLines: 2,
+                  style: const TextStyle(color: Colors.white54, fontSize: 12)),
+              ],
+            )),
+            const SizedBox(width: 6),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Text(_cash(r.totalFare), style: const TextStyle(
+                color: Color(0xFF29CF63), fontSize: 17,
+                fontWeight: FontWeight.w800)),
+              const SizedBox(height: 5),
+              Text(r.distanceKm.toStringAsFixed(1) + ' km • ' +
+                    (r.durationSeconds ~/ 60).toString() + ' phút',
+                style: const TextStyle(color: Colors.white54, fontSize: 11)),
+            ]),
+            PopupMenuButton<String>(
+              tooltip: 'Tùy chọn chuyến đi',
+              onSelected: (action) {
+                if (action == 'delete') _delete(trip);
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'delete', child: Text('Xóa chuyến')),
+              ],
+              icon: const Icon(Icons.more_vert, size: 20,
+                color: Colors.white54),
+            ),
+          ]),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final total = _trips.fold<double>(0,
-      (v, r) => v + r.receipt.totalFare);
-    final km = _trips.fold<double>(0,
-      (v, r) => v + r.receipt.distanceKm);
+    final report = RevenueSummary.calculate(
+      _trips, period: _period, now: DateTime.now());
     return Scaffold(
+      backgroundColor: const Color(0xFF090909),
       appBar: AppBar(
-        title: const Text('LỊCH SỬ CHUYẾN ĐI'),
+        backgroundColor: const Color(0xFF090909),
+        centerTitle: true,
+        title: const Text('Doanh thu',
+          style: TextStyle(fontWeight: FontWeight.w800)),
         actions: [
-          IconButton(onPressed: _trips.isEmpty ? null : _clear,
-            tooltip: 'Xóa toàn bộ', icon: const Icon(Icons.delete_sweep)),
+          PopupMenuButton<String>(
+            tooltip: 'Quản lý lịch sử',
+            enabled: _trips.isNotEmpty,
+            onSelected: (action) {
+              if (action == 'clear') _clear();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'clear', child: Text('Xóa toàn bộ lịch sử')),
+            ],
+          ),
         ],
       ),
-      body: _loading
-        ? const Center(child: CircularProgressIndicator())
-        : Column(children: [
-            Padding(padding: const EdgeInsets.all(12),
-              child: Wrap(spacing: 8, runSpacing: 8, children: [
-                Chip(label: Text('Số chuyến: ' + _trips.length.toString())),
-                Chip(label: Text('Doanh thu: ' + _cash(total))),
-                Chip(label: Text('Tổng: ' + km.toStringAsFixed(2) + ' km')),
+      body: _loading ? const Center(child: CircularProgressIndicator())
+        : RefreshIndicator(onRefresh: _load,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(14, 13, 14, 22),
+            children: [
+              _periodPicker(),
+              const SizedBox(height: 17),
+              Row(children: [
+                Expanded(child: _statCard(Icons.attach_money,
+                  const Color(0xFF28CB60),
+                  _cash(report.totalFare), 'Tổng doanh thu')),
+                const SizedBox(width: 10),
+                Expanded(child: _statCard(Icons.local_taxi,
+                  const Color(0xFF168FFF),
+                  report.tripCount.toString(), 'Tổng số chuyến')),
               ]),
-            ),
-            Expanded(child: _trips.isEmpty
-              ? const Center(child: Text('Chưa có chuyến đi'))
-              : ListView.builder(
-                  itemCount: _trips.length,
-                  itemBuilder: (ctx, i) {
-                    final r = _trips[i];
-                    return Card(
-                      margin: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 5),
-                      child: ListTile(
-                        leading: const Icon(Icons.local_taxi,
-                          color: Color(0xFF00D8F0)),
-                        title: Text(_cash(r.receipt.totalFare),
-                          style: const TextStyle(
-                            color: Color(0xFFFFB800),
-                            fontWeight: FontWeight.bold)),
-                        subtitle: Text(r.receipt.startedAt.toLocal()
-                            .toString().substring(0, 16) +
-                          ' • ' +
-                          r.receipt.distanceKm.toStringAsFixed(2) +
-                          ' km\n' +
-                          (r.pickup.isEmpty ? 'Không ghi điểm đón'
-                            : r.pickup) +
-                          ' → ' +
-                          (r.dropoff.isEmpty ? 'Không ghi điểm trả'
-                            : r.dropoff)),
-                        isThreeLine: true,
-                        onTap: () => _openReceipt(r),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: () => _delete(r)),
-                      ),
-                    );
-                  },
-                )),
-          ]),
+              const SizedBox(height: 10),
+              Row(children: [
+                Expanded(child: _statCard(Icons.map_outlined,
+                  const Color(0xFFFF9731),
+                  report.totalDistanceKm.toStringAsFixed(1) + ' km',
+                  'Tổng quãng đường')),
+                const SizedBox(width: 10),
+                Expanded(child: _statCard(Icons.bar_chart,
+                  const Color(0xFFD13FEC),
+                  _cash(report.averageFare), 'Tiền TB/chuyến')),
+              ]),
+              const SizedBox(height: 18),
+              const Text('Lịch sử chuyến đi',
+                style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 13),
+              if (report.trips.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 40),
+                  child: Center(child: Text('Không có chuyến đi trong kỳ',
+                    style: TextStyle(color: Colors.white60))),
+                )
+              else
+                for (final trip in report.trips) _tripTile(trip),
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+      bottomNavigationBar: SafeArea(top: false, child: NavigationBar(
+        height: 68,
+        backgroundColor: const Color(0xFF202023),
+        selectedIndex: 1,
+        onDestinationSelected: (value) {
+          if (value == 0) Navigator.pop(context);
+        },
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.speed_outlined), label: 'Đồng hồ cước'),
+          NavigationDestination(
+            icon: Icon(Icons.bar_chart, color: Color(0xFF168FFF)),
+            label: 'Doanh thu'),
+        ],
+      )),
     );
   }
 }
