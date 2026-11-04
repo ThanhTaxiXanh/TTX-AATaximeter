@@ -222,23 +222,25 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   }
 
   void _meterTick(DateTime now) {
-    if (meter.status == MeterStatus.running) {
-      if (_trackingPolicy.shouldSuspend(now)) {
-        _suspendForGps('GPS mất tín hiệu: đã tạm ngắt tính cước');
-        return;
-      }
-      setState(() {
-        if (_trackingPolicy.hasRecentFix(now)) {
-          meter.tick(now);
-        } else {
-          // Before GPS lock / during stale periods do not charge waiting.
-          meter.skipUntrustedInterval(now);
-        }
-      });
-    } else if (meter.status == MeterStatus.paused) {
-      // Manual pause accrues waiting; interrupted pause never does.
-      setState(() => meter.tick(now));
+    // A manual pause may accrue waiting, but only with reliable GPS.
+    // An interruption never adds distance, elapsed time or waiting charges.
+    final active = meter.status == MeterStatus.running ||
+        meter.status == MeterStatus.paused;
+    if (!active) return;
+    if (!meter.requiresManualResume && _trackingPolicy.shouldSuspend(now)) {
+      _suspendForGps('GPS mất tín hiệu: đã tạm ngắt tính cước');
+      return;
     }
+    setState(() {
+      if (meter.requiresManualResume) {
+        meter.tick(now);
+      } else if (_trackingPolicy.hasRecentFix(now)) {
+        meter.tick(now);
+      } else {
+        // Do not charge an unobserved interval in either RUNNING or PAUSED.
+        meter.skipUntrustedInterval(now);
+      }
+    });
     _checkpoint();
   }
 
@@ -278,12 +280,25 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       setState(() => _gpsStatus = 'GPS nền: đang chờ vị trí chính xác...');
       _gps = Geolocator.getPositionStream(locationSettings: settings)
           .listen((position) {
-        if (!mounted) return;
+        if (!mounted || meter.requiresManualResume ||
+            meter.status == MeterStatus.finished ||
+            meter.status == MeterStatus.idle) return;
         final now = DateTime.now();
+        // Check the old watchdog state BEFORE refreshing it with this fix.
+        // Otherwise a resumed stream could hide a long background GPS gap.
+        if (_trackingPolicy.shouldSuspend(now)) {
+          _suspendForGps('GPS gián đoạn quá ngưỡng: tạm ngắt tính cước');
+          return;
+        }
         final age = now.difference(position.timestamp);
         // A cached or future fix must not refresh the GPS watchdog.
         if (age.isNegative && age.abs() > const Duration(seconds: 3)) return;
         if (age > const Duration(seconds: 12)) return;
+        final firstFix = !_trackingPolicy.hasTrustedFix;
+        if (firstFix) {
+          // The time before GPS lock is unobserved, not billable waiting.
+          meter.skipUntrustedInterval(now);
+        }
         final accepted = meter.acceptGps(GpsFix(
           latitude: position.latitude,
           longitude: position.longitude,
@@ -302,7 +317,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           _gpsStatus = 'GPS nền ±' +
               position.accuracy.toStringAsFixed(0) + ' m';
         });
-        _checkpoint();
+        // Also advance on each valid fix: Android may throttle Dart timers
+        // during multitasking, but a healthy location stream may continue.
+        _meterTick(now);
       }, onError: (Object error) {
         _suspendForGps('Dịch vụ GPS lỗi: $error');
       }, onDone: () {
@@ -322,7 +339,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _appVisible = state != AppLifecycleState.hidden &&
-        state != AppLifecycleState.paused;
+        state != AppLifecycleState.paused &&
+        state != AppLifecycleState.detached;
     if (state != AppLifecycleState.hidden &&
         state != AppLifecycleState.paused) return;
     if (meter.status != MeterStatus.running &&

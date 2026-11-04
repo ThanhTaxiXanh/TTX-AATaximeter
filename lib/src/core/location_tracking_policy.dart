@@ -46,11 +46,12 @@ class LocationTrackingPolicy {
     final start = _startedAt;
     if (start == null) return false;
     final last = _lastTrustedFixAt;
-    if (last == null) {
-      return !now.isBefore(start) &&
-          now.difference(start) > acquireTimeout;
-    }
-    return now.isAfter(last) && now.difference(last) > gpsGapTimeout;
+    // An unexpected wall-clock reversal invalidates the elapsed-time proof.
+    // Do not resume charging until the driver re-establishes GPS monitoring.
+    if (now.isBefore(start)) return true;
+    if (last == null) return now.difference(start) > acquireTimeout;
+    if (now.isBefore(last)) return true;
+    return now.difference(last) > gpsGapTimeout;
   }
 
   bool canLeaveForeground(DateTime now, {required bool streamSubscribed}) =>

@@ -367,7 +367,8 @@ class TaximeterEngine {
   /// Advance the internal monotonic meter tick reference without charging
   /// waiting time or inventing distance during an untrusted GPS interval.
   void skipUntrustedInterval(DateTime at) {
-    if (status != MeterStatus.running || _interrupted) return;
+    if ((status != MeterStatus.running && status != MeterStatus.paused) ||
+        _interrupted) return;
     if (_lastTick == null || at.isBefore(_lastTick!)) return;
     _lastTick = at;
     _lastFix = null;

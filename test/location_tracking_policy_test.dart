@@ -38,6 +38,7 @@ void main() {
     gate.begin(start);
     gate.acceptedFix(start.add(const Duration(seconds: 20)));
     expect(gate.hasRecentFix(start.add(const Duration(seconds: 19))), false);
+    expect(gate.shouldSuspend(start.add(const Duration(seconds: 19))), true);
     gate.acceptedFix(start.add(const Duration(seconds: 1)));
     expect(gate.lastTrustedFixAt, start.add(const Duration(seconds: 20)));
     gate.clear();
