@@ -30,6 +30,8 @@ jobs:
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
       - name: Build DEBUG APK (not Android Auto enabled)
         run: flutter build apk --debug
+      - name: Verify APK merged GPS foreground-service manifest
+        run: python3 tool/verify_apk_manifest.py
       - uses: actions/upload-artifact@v4
         with:
           name: ttx-aataximeter-mvp-debug
