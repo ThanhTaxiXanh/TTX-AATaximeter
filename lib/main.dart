@@ -203,6 +203,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
          meter.status == MeterStatus.paused)) {
       setState(() => meter.suspendForInterruption());
       _checkpoint(force: true);
+      _gps?.cancel();
+      _gps = null;
     }
   }
 
@@ -343,6 +345,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       return;
     }
     setState(() => meter.addToll(amount));
+    _checkpoint(force: true);
   }
 
   Widget _buildCarMode() {
@@ -431,8 +434,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             Expanded(child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 3),
               child: OutlinedButton(
-                onPressed: active ? () =>
-                    setState(() => meter.addToll(amount.toDouble())) : null,
+                onPressed: active ? () {
+                  setState(() => meter.addToll(amount.toDouble()));
+                  _checkpoint(force: true);
+                } : null,
                 child: Text('BOT +${amount ~/ 1000}k',
                   style: const TextStyle(
                     color: Color(0xFF00D8F0), fontSize: 12)),
@@ -590,6 +595,24 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       ),
       body: SafeArea(
         child: ListView(padding: const EdgeInsets.all(12), children: [
+          if (meter.requiresManualResume)
+            const Card(child: ListTile(
+              leading: Icon(Icons.pause_circle, color: Colors.orangeAccent),
+              title: Text('Đã khôi phục chuyến ở trạng thái an toàn'),
+              subtitle: Text('Không tính thêm phí trong khoảng gián đoạn. '
+                  'Bấm TIẾP TỤC để tiếp tục chuyến.'),
+            )),
+          if (_checkpointError != null)
+            Card(child: ListTile(
+              leading: const Icon(Icons.warning_amber, color: Colors.redAccent),
+              title: const Text('Không ghi được bản sao chuyến mới nhất'),
+              subtitle: Text(_checkpointError!),
+              trailing: IconButton(icon: const Icon(Icons.refresh),
+                onPressed: () => setState(() {
+                  _checkpointError = null;
+                  _checkpoint(force: true);
+                })),
+            )),
           Card(child: ListTile(
             leading: const Icon(Icons.gps_fixed, color: Color(0xFF00DA75)),
             title: Text(_gpsStatus, style: const TextStyle(
@@ -681,13 +704,15 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           if (active) ...[
             Row(children: [
               Expanded(child: FilledButton.icon(
-                onPressed: () => setState(() {
-                  if (status == MeterStatus.running) {
-                    meter.pause();
-                  } else {
-                    meter.resume();
-                  }
-                }),
+                onPressed: () {
+                final resuming = status == MeterStatus.paused;
+                setState(() {
+                  if (!resuming) { meter.pause(); }
+                  else { meter.resume(); }
+                });
+                _checkpoint(force: true);
+                if (resuming) _enableGps();
+              },
                 icon: Icon(status == MeterStatus.running ?
                     Icons.pause : Icons.play_arrow),
                 label: Text(status == MeterStatus.running ?
@@ -700,14 +725,22 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
               )),
             ]),
             Wrap(spacing: 8, children: [
-              ActionChip(label: const Text('+10.000đ BOT'), onPressed: () =>
-                  setState(() => meter.addToll(10000))),
-              ActionChip(label: const Text('+20.000đ BOT'), onPressed: () =>
-                  setState(() => meter.addToll(20000))),
-              ActionChip(label: const Text('+35.000đ BOT'), onPressed: () =>
-                  setState(() => meter.addToll(35000))),
-              ActionChip(label: const Text('+50.000đ BOT'), onPressed: () =>
-                  setState(() => meter.addToll(50000))),
+              ActionChip(label: const Text('+10.000đ BOT'), onPressed: () {
+                setState(() => meter.addToll(10000));
+                _checkpoint(force: true);
+              }),
+              ActionChip(label: const Text('+20.000đ BOT'), onPressed: () {
+                setState(() => meter.addToll(20000));
+                _checkpoint(force: true);
+              }),
+              ActionChip(label: const Text('+35.000đ BOT'), onPressed: () {
+                setState(() => meter.addToll(35000));
+                _checkpoint(force: true);
+              }),
+              ActionChip(label: const Text('+50.000đ BOT'), onPressed: () {
+                setState(() => meter.addToll(50000));
+                _checkpoint(force: true);
+              }),
               ActionChip(label: const Text('✎ Tùy chỉnh'),
                   onPressed: _customTollDialog),
             ]),
