@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -902,7 +903,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   Widget _selectedCompanyCard(MeterStatus status) {
     final active = status == MeterStatus.running ||
         status == MeterStatus.paused;
-    final label = _tariffCatalog.active.label;
+    final label = status == MeterStatus.idle ||
+            _tripFareProfileName.isEmpty
+        ? _tariffCatalog.active.label : _tripFareProfileName;
     final stateText = meter.requiresManualResume
         ? 'Tạm ngắt'
         : status == MeterStatus.running ? 'Đang chạy'
@@ -980,16 +983,24 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     switch (choice) {
       case 'vehicle':
         _configureVehicle();
+        return;
       case 'bank':
         _configureBank();
+        return;
       case 'quote':
         _flatFareDialog();
+        return;
       case 'qr':
         _showQr();
+        return;
       case 'car':
         setState(() => _carPreview = true);
+        return;
       case 'toll':
         _customTollDialog();
+        return;
+      default:
+        return;
     }
   }
 
