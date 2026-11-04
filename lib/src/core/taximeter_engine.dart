@@ -258,8 +258,8 @@ class TaximeterEngine {
     return 2 * radius * math.atan2(math.sqrt(h), math.sqrt(math.max(0, 1 - h)));
   }
 
-  double get baseFare => status == MeterStatus.idle || flatFare != null
-      ? 0 : _tariff.baseFare;
+  double get baseFare => status == MeterStatus.idle
+      ? 0 : (flatFare ?? _tariff.baseFare);
 
   double get distanceFare {
     if (status == MeterStatus.idle || flatFare != null) return 0;
@@ -276,7 +276,7 @@ class TaximeterEngine {
 
   double get rawFare => status == MeterStatus.idle
       ? 0
-      : flatFare ?? math.max(0.0,
+      : math.max(0.0,
           baseFare + distanceFare + waitingFare + tollFee + surcharge - discount);
 
   double get totalFare {
