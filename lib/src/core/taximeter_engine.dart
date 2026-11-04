@@ -228,13 +228,21 @@ class TaximeterEngine {
     maxSpeedKmh = math.max(maxSpeedKmh, speedKmh);
     if (status != MeterStatus.running) return;
     final before = _lastFix;
-    _lastFix = fix;
-    if (before == null || !fix.timestamp.isAfter(before.timestamp)) return;
+    if (before == null) {
+      _lastFix = fix;
+      return;
+    }
+    if (!fix.timestamp.isAfter(before.timestamp)) return;
     final seconds = fix.timestamp.difference(before.timestamp).inMilliseconds / 1000;
     final meters = _haversine(before, fix);
     final plausibleMax = math.max(25.0, seconds * 65.0);
-    final noiseFloor = math.max(3.0, math.max(before.accuracyMeters, fix.accuracyMeters) * 0.5);
-    if (meters > noiseFloor && meters <= plausibleMax) {
+    // Reject GPS jumps without replacing the last known-good fix.
+    if (meters > plausibleMax) return;
+    _lastFix = fix;
+    final noiseFloor = math.max(
+      3.0, math.max(before.accuracyMeters, fix.accuracyMeters) * 0.5,
+    );
+    if (meters > noiseFloor) {
       distanceMeters += meters * _tariff.gpsCalibrationMultiplier;
     }
   }
