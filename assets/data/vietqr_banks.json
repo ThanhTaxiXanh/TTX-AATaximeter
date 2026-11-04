@@ -1,0 +1,539 @@
+{
+  "code": "00",
+  "source": "https://api.vietqr.io/v2/banks",
+  "fetchedOn": "2026-11-04",
+  "data": [
+    {
+      "bin": "970415",
+      "code": "ICB",
+      "shortName": "VietinBank",
+      "name": "Ngân hàng TMCP Công thương Việt Nam",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970436",
+      "code": "VCB",
+      "shortName": "Vietcombank",
+      "name": "Ngân hàng TMCP Ngoại thương Việt Nam",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970418",
+      "code": "BIDV",
+      "shortName": "BIDV",
+      "name": "Ngân hàng TMCP Đầu tư và Phát triển Việt Nam",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970405",
+      "code": "VBA",
+      "shortName": "Agribank",
+      "name": "Ngân hàng Nông nghiệp và Phát triển Nông thôn Việt Nam",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970448",
+      "code": "OCB",
+      "shortName": "OCB",
+      "name": "Ngân hàng TMCP Phương Đông",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970422",
+      "code": "MB",
+      "shortName": "MBBank",
+      "name": "Ngân hàng TMCP Quân đội",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970407",
+      "code": "TCB",
+      "shortName": "Techcombank",
+      "name": "Ngân hàng TMCP Kỹ thương Việt Nam",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970416",
+      "code": "ACB",
+      "shortName": "ACB",
+      "name": "Ngân hàng TMCP Á Châu",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970432",
+      "code": "VPB",
+      "shortName": "VPBank",
+      "name": "Ngân hàng TMCP Việt Nam Thịnh Vượng",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970423",
+      "code": "TPB",
+      "shortName": "TPBank",
+      "name": "TPBank",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970403",
+      "code": "STB",
+      "shortName": "Sacombank",
+      "name": "Ngân hàng TMCP Sài Gòn Tài Lộc",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970437",
+      "code": "HDB",
+      "shortName": "HDBank",
+      "name": "Ngân hàng TMCP Phát triển Thành phố Hồ Chí Minh",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970454",
+      "code": "VCCB",
+      "shortName": "VietCapitalBank",
+      "name": "VietCapitalBank",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970429",
+      "code": "SCB",
+      "shortName": "SCB",
+      "name": "SCB",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970441",
+      "code": "VIB",
+      "shortName": "VIB",
+      "name": "VIB",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970443",
+      "code": "SHB",
+      "shortName": "SHB",
+      "name": "Ngân hàng TMCP Sài Gòn - Hà Nội",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970431",
+      "code": "EIB",
+      "shortName": "Eximbank",
+      "name": "Eximbank",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970426",
+      "code": "MSB",
+      "shortName": "MSB",
+      "name": "Ngân hàng TMCP Hàng Hải Việt Nam",
+      "transferSupported": 1
+    },
+    {
+      "bin": "546034",
+      "code": "CAKE",
+      "shortName": "CAKE",
+      "name": "CAKE",
+      "transferSupported": 1
+    },
+    {
+      "bin": "546035",
+      "code": "Ubank",
+      "shortName": "Ubank",
+      "name": "Ubank",
+      "transferSupported": 1
+    },
+    {
+      "bin": "963388",
+      "code": "TIMO",
+      "shortName": "Timo",
+      "name": "Timo",
+      "transferSupported": 1
+    },
+    {
+      "bin": "971005",
+      "code": "VTLMONEY",
+      "shortName": "ViettelMoney",
+      "name": "ViettelMoney",
+      "transferSupported": 0
+    },
+    {
+      "bin": "971011",
+      "code": "VNPTMONEY",
+      "shortName": "VNPTMoney",
+      "name": "VNPTMoney",
+      "transferSupported": 0
+    },
+    {
+      "bin": "970400",
+      "code": "SGICB",
+      "shortName": "SaigonBank",
+      "name": "SaigonBank",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970409",
+      "code": "BAB",
+      "shortName": "BacABank",
+      "name": "BacABank",
+      "transferSupported": 1
+    },
+    {
+      "bin": "971133",
+      "code": "PVDB",
+      "shortName": "PVcomBankPay",
+      "name": "PVcomBankPay",
+      "transferSupported": 1
+    },
+    {
+      "bin": "971025",
+      "code": "momo",
+      "shortName": "MoMo",
+      "name": "MoMo",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970412",
+      "code": "PVCB",
+      "shortName": "PVcomBank",
+      "name": "PVcomBank",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970414",
+      "code": "MBV",
+      "shortName": "MBV",
+      "name": "MBV",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970419",
+      "code": "NCB",
+      "shortName": "NCB",
+      "name": "NCB",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970424",
+      "code": "SHBVN",
+      "shortName": "ShinhanBank",
+      "name": "ShinhanBank",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970425",
+      "code": "ABB",
+      "shortName": "ABBANK",
+      "name": "ABBANK",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970427",
+      "code": "VAB",
+      "shortName": "VietABank",
+      "name": "VietABank",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970428",
+      "code": "NAB",
+      "shortName": "NamABank",
+      "name": "NamABank",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970430",
+      "code": "PGB",
+      "shortName": "PGBank",
+      "name": "PGBank",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970433",
+      "code": "VIETBANK",
+      "shortName": "VietBank",
+      "name": "VietBank",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970438",
+      "code": "BVB",
+      "shortName": "BaoVietBank",
+      "name": "BaoVietBank",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970440",
+      "code": "SEAB",
+      "shortName": "SeABank",
+      "name": "SeABank",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970446",
+      "code": "COOPBANK",
+      "shortName": "COOPBANK",
+      "name": "COOPBANK",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970449",
+      "code": "LPB",
+      "shortName": "LPBank",
+      "name": "Ngân hàng TMCP Lộc Phát Việt Nam",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970452",
+      "code": "KLB",
+      "shortName": "KienLongBank",
+      "name": "KienLongBank",
+      "transferSupported": 1
+    },
+    {
+      "bin": "668888",
+      "code": "KBank",
+      "shortName": "KBank",
+      "name": "KBank",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970466",
+      "code": "KEBHANAHCM",
+      "shortName": "KEBHanaHCM",
+      "name": "KEBHanaHCM",
+      "transferSupported": 0
+    },
+    {
+      "bin": "970467",
+      "code": "KEBHANAHN",
+      "shortName": "KEBHanaHN",
+      "name": "KEBHanaHN",
+      "transferSupported": 0
+    },
+    {
+      "bin": "977777",
+      "code": "MAFC",
+      "shortName": "MAFC",
+      "name": "MAFC",
+      "transferSupported": 0
+    },
+    {
+      "bin": "999888",
+      "code": "VBSP",
+      "shortName": "VBSP",
+      "name": "VBSP",
+      "transferSupported": 0
+    },
+    {
+      "bin": "963668",
+      "code": "BNPHN",
+      "shortName": "BNPHN",
+      "name": "BNPHN",
+      "transferSupported": 0
+    },
+    {
+      "bin": "555666",
+      "code": "BIDC",
+      "shortName": "BIDC",
+      "name": "BIDC",
+      "transferSupported": 0
+    },
+    {
+      "bin": "963666",
+      "code": "BNPHCM",
+      "shortName": "BNPHCM",
+      "name": "BNPHCM",
+      "transferSupported": 0
+    },
+    {
+      "bin": "971101",
+      "code": "ZALOPAY",
+      "shortName": "ZaloPay",
+      "name": "ZaloPay",
+      "transferSupported": 1
+    },
+    {
+      "bin": "963688",
+      "code": "BOCHK",
+      "shortName": "BOCHK",
+      "name": "BOCHK",
+      "transferSupported": 0
+    },
+    {
+      "bin": "970465",
+      "code": "BSP",
+      "shortName": "BSP",
+      "name": "BSP",
+      "transferSupported": 0
+    },
+    {
+      "bin": "168999",
+      "code": "CUBHCM",
+      "shortName": "CUBHCM",
+      "name": "CUBHCM",
+      "transferSupported": 0
+    },
+    {
+      "bin": "963686",
+      "code": "ESUN",
+      "shortName": "ESUN",
+      "name": "ESUN",
+      "transferSupported": 0
+    },
+    {
+      "bin": "963669",
+      "code": "ICBC",
+      "shortName": "ICBC",
+      "name": "ICBC",
+      "transferSupported": 0
+    },
+    {
+      "bin": "971032",
+      "code": "MVAS",
+      "shortName": "MVAS",
+      "name": "MVAS",
+      "transferSupported": 1
+    },
+    {
+      "bin": "963326",
+      "code": "TNEX",
+      "shortName": "TNEX",
+      "name": "TNEX",
+      "transferSupported": 0
+    },
+    {
+      "bin": "458761",
+      "code": "HSBC",
+      "shortName": "HSBC",
+      "name": "HSBC",
+      "transferSupported": 0
+    },
+    {
+      "bin": "970442",
+      "code": "HLBVN",
+      "shortName": "HongLeong",
+      "name": "HongLeong",
+      "transferSupported": 0
+    },
+    {
+      "bin": "970455",
+      "code": "IBKHN",
+      "shortName": "IBKHN",
+      "name": "IBKHN",
+      "transferSupported": 0
+    },
+    {
+      "bin": "970456",
+      "code": "IBKHCM",
+      "shortName": "IBKHCM",
+      "name": "IBKHCM",
+      "transferSupported": 0
+    },
+    {
+      "bin": "970434",
+      "code": "IVB",
+      "shortName": "IndovinaBank",
+      "name": "IndovinaBank",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970406",
+      "code": "Vikki",
+      "shortName": "Vikki",
+      "name": "Vikki",
+      "transferSupported": 0
+    },
+    {
+      "bin": "801011",
+      "code": "NHB",
+      "shortName": "Nonghyup",
+      "name": "Nonghyup",
+      "transferSupported": 0
+    },
+    {
+      "bin": "796500",
+      "code": "DBS",
+      "shortName": "DBSBank",
+      "name": "DBSBank",
+      "transferSupported": 0
+    },
+    {
+      "bin": "970439",
+      "code": "PBVN",
+      "shortName": "PublicBank",
+      "name": "PublicBank",
+      "transferSupported": 0
+    },
+    {
+      "bin": "970410",
+      "code": "SCVN",
+      "shortName": "StandardChartered",
+      "name": "StandardChartered",
+      "transferSupported": 0
+    },
+    {
+      "bin": "533948",
+      "code": "CITIBANK",
+      "shortName": "Citibank",
+      "name": "Citibank",
+      "transferSupported": 0
+    },
+    {
+      "bin": "422589",
+      "code": "CIMB",
+      "shortName": "CIMB",
+      "name": "CIMB",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970458",
+      "code": "UOB",
+      "shortName": "UnitedOverseas",
+      "name": "UnitedOverseas",
+      "transferSupported": 0
+    },
+    {
+      "bin": "970444",
+      "code": "CBB",
+      "shortName": "CBBank",
+      "name": "CBBank",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970408",
+      "code": "GPB",
+      "shortName": "GPBank",
+      "name": "GPBank",
+      "transferSupported": 0
+    },
+    {
+      "bin": "970421",
+      "code": "VRB",
+      "shortName": "VRB",
+      "name": "VRB",
+      "transferSupported": 0
+    },
+    {
+      "bin": "970457",
+      "code": "WVN",
+      "shortName": "Woori",
+      "name": "Woori",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970462",
+      "code": "KBHN",
+      "shortName": "KookminHN",
+      "name": "KookminHN",
+      "transferSupported": 1
+    },
+    {
+      "bin": "970463",
+      "code": "KBHCM",
+      "shortName": "KookminHCM",
+      "name": "KookminHCM",
+      "transferSupported": 1
+    }
+  ]
+}

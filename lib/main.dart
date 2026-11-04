@@ -11,13 +11,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'src/core/taximeter_engine.dart';
 import 'src/core/location_tracking_policy.dart';
 import 'src/ui/fare_breakdown_section.dart';
-import 'src/domain/toll_schedule.dart';
-import 'src/ui/toll_schedule_dialog.dart';
 import 'src/ui/quote_dialog.dart';
 import 'src/data/trip_repository.dart';
 import 'src/domain/trip_record.dart';
 import 'src/payment/vietqr.dart';
-import 'src/ui/payment_dialogs.dart';
+import 'src/ui/bank_accounts_dialog.dart';
+import 'src/ui/vietqr_payment_panel.dart';
+import 'src/payment/bank_book.dart';
 import 'src/ui/trip_history_page.dart';
 import 'src/ui/trip_receipt_dialog.dart';
 import 'src/data/tariff_codec.dart';
@@ -81,7 +81,6 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   final SharedPreferencesAsync store = SharedPreferencesAsync();
   final TripRepository repository = TripRepository();
   TariffCatalog _tariffCatalog = TariffCatalog.initial();
-  TollSchedule _tollSchedule = const TollSchedule();
   double? _mapLat;
   double? _mapLon;
   bool _storageReady = false;
@@ -90,7 +89,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   Future<void> _writeQueue = Future<void>.value();
   String? _checkpointError;
   TripRecord? _pendingUnsaved;
-  VietQrAccount? _bank;
+  BankBook _bankBook = const BankBook();
   VehicleRegistration? _vehicle;
   bool _vehicleDialogOpen = false;
   String _tripPickup = '';
@@ -134,13 +133,14 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           // Broken optional bank settings should never block completed trips.
         }
       }
-      TollSchedule tollSchedule = const TollSchedule();
-      final storedTolls = await store.getString('ttx_toll_schedule_v1');
-      if (storedTolls != null) {
+      BankBook bankBook = account == null
+          ? const BankBook() : BankBook.migrateLegacy(account);
+      final savedBankBook = await store.getString('ttx_vietqr_bank_book_v1');
+      if (savedBankBook != null) {
         try {
-          tollSchedule = TollSchedule.decode(storedTolls);
+          bankBook = BankBook.decode(savedBankBook);
         } catch (_) {
-          // Invalid optional presets should not block receipt recovery.
+          // Legacy account is retained if the newer account book is corrupted.
         }
       }
       VehicleRegistration? registration;
@@ -184,10 +184,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       }
       if (!mounted) return;
       setState(() {
-        _bank = account;
+        _bankBook = bankBook;
         _vehicle = registration;
         _tariffCatalog = catalog;
-        _tollSchedule = tollSchedule;
         _storageReady = true;
       });
       await CarStateBridge.publish(meter);
@@ -664,7 +663,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         context: context,
         builder: (dialogContext) => TripReceiptDialog(
           record: record,
-          onQr: () => _showQr(record.receipt.totalFare.round()),
+          bankBook: _bankBook,
+          onConfigureBank: _configureBank,
         ),
       );
       if (method != null) {
@@ -713,63 +713,6 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       return;
     }
     if (mounted) await _enableGps();
-  }
-
-  Future<void> _configureTollSchedule() async {
-    final updated = await showDialog<TollSchedule>(
-      context: context,
-      builder: (ctx) => TollScheduleDialog(initial: _tollSchedule),
-    );
-    if (updated == null || !mounted) return;
-    try {
-      await store.setString('ttx_toll_schedule_v1', updated.encode());
-      if (mounted) {
-        setState(() => _tollSchedule = updated);
-        _notify('Đã lưu bảng giá phí BOT');
-      }
-    } catch (error) {
-      if (mounted) _notify('Lỗi lưu biểu giá BOT: ' + error.toString());
-    }
-  }
-
-  Future<void> _chooseTollFromSchedule() async {
-    if (meter.status != MeterStatus.running &&
-        meter.status != MeterStatus.paused) {
-      _notify('Chỉ cộng BOT vào chuyến đang chạy');
-      return;
-    }
-    if (_tollSchedule.rates.isEmpty) {
-      await _configureTollSchedule();
-      return;
-    }
-    final selected = await showModalBottomSheet<TollRate>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(child: ListView(
-        shrinkWrap: true,
-        padding: const EdgeInsets.all(12),
-        children: [
-          const Text('CHỌN TRẠM BOT ĐÃ ĐI QUA',
-            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
-          const Text('Chỉ cộng vào cước khi bạn xác nhận.',
-            style: TextStyle(color: Colors.white60)),
-          for (final rate in _tollSchedule.rates)
-            ListTile(
-              title: Text(rate.label),
-              subtitle: Text(vnd(rate.amount)),
-              leading: const Icon(Icons.toll),
-              onTap: () => Navigator.pop(ctx, rate),
-            ),
-        ],
-      )),
-    );
-    if (!mounted || selected == null ||
-        (meter.status != MeterStatus.running &&
-        meter.status != MeterStatus.paused)) return;
-    setState(() => meter.addToll(selected.amount));
-    _checkpoint(force: true);
-    _notify('Đã cộng BOT: ' + selected.label + ' • ' +
-        vnd(selected.amount));
   }
 
   Future<void> _customTollDialog() async {
@@ -1047,7 +990,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (ctx) => TripHistoryPage(
         repository: repository,
-        onQr: (amount) => _showQr(amount),
+        bankBook: _bankBook,
+        onConfigureBank: _configureBank,
       ),
     ));
   }
@@ -1075,43 +1019,43 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     }
   }
 
-  Future<VietQrAccount?> _configureBank() async {
-    final chosen = await showDialog<VietQrAccount>(
+  Future<BankBook?> _configureBank() async {
+    final chosen = await showDialog<BankBook>(
       context: context,
-      builder: (ctx) => BankAccountDialog(initial: _bank),
+      builder: (ctx) => BankAccountsDialog(initial: _bankBook),
     );
-    if (chosen == null || !mounted) return _bank;
+    if (chosen == null || !mounted) return _bankBook;
     try {
-      await store.setString('ttx_vietqr_account_v1',
-        jsonEncode(chosen.toJson()));
-      if (mounted) setState(() => _bank = chosen);
+      // Bank numbers and brand image paths live only in local app storage.
+      await store.setString('ttx_vietqr_bank_book_v1', chosen.encode());
+      if (mounted) {
+        setState(() => _bankBook = chosen);
+        _notify('Đã lưu tài khoản ngân hàng và logo QR');
+      }
       return chosen;
     } catch (error) {
-      if (mounted) _notify('Không lưu được cấu hình ngân hàng: '
-          + error.toString());
+      if (mounted) _notify('Không lưu được danh sách ngân hàng: ' +
+          error.toString());
       return null;
     }
   }
 
   Future<void> _showQr([int? value]) async {
     final amount = value ?? meter.totalFare.round();
-    if (amount <= 0) {
-      _notify('Cần có số tiền cước lớn hơn 0 để tạo mã QR động');
-      return;
+    if (amount < 0) return;
+    var book = _bankBook;
+    if (book.selected == null) {
+      final selected = await _configureBank();
+      if (selected == null || !mounted) return;
+      book = selected;
     }
-    var account = _bank;
-    if (account == null || !account.isValid) {
-      account = await _configureBank();
-    }
-    if (account == null || !mounted) return;
-    final memo = 'TTX CUOC ' + DateTime.now()
-        .millisecondsSinceEpoch.toString();
+    if (book.selected == null || !mounted) return;
     await showDialog<void>(
       context: context,
       builder: (ctx) => PaymentQrDialog(
-        account: account!,
+        book: book,
         amountVnd: amount,
-        memo: memo,
+        memo: 'TTX TAXI',
       ),
     );
   }
@@ -1243,9 +1187,6 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       case 'toll':
         _customTollDialog();
         return;
-      case 'tollSchedule':
-        _configureTollSchedule();
-        return;
       case 'locationPermission':
         _explainAlwaysLocation();
         return;
@@ -1289,9 +1230,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
               PopupMenuItem(value: 'car',
                 child: Text('Chế độ Car Mode / HUD trên điện thoại')),
               PopupMenuItem(value: 'toll',
-                child: Text('Nhập phí BOT tùy chỉnh')),
-              PopupMenuItem(value: 'tollSchedule',
-                child: Text('Cài đặt bảng giá phí cầu đường (BOT)')),
+                child: Text('Nhập phí BOT')),
               PopupMenuItem(value: 'locationPermission',
                 child: Text('Quyền định vị “Luôn cho phép”')),
             ],
@@ -1373,19 +1312,13 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             ]),
             Padding(
               padding: const EdgeInsets.only(top: 7),
-              child: Row(children: [
-                Expanded(child: OutlinedButton.icon(
-                  onPressed: _chooseTollFromSchedule,
-                  icon: const Icon(Icons.toll),
-                  label: const Text('Chọn trạm BOT'),
-                )),
-                const SizedBox(width: 8),
-                Expanded(child: OutlinedButton.icon(
+              child: SizedBox(width: double.infinity,
+                child: OutlinedButton.icon(
                   onPressed: _customTollDialog,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Nhập phí khác'),
-                )),
-              ]),
+                  icon: const Icon(Icons.toll),
+                  label: const Text('Nhập phí BOT'),
+                ),
+              ),
             ),
           ],
           if (status == MeterStatus.finished)

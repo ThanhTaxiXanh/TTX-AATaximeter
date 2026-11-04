@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../data/trip_repository.dart';
 import '../domain/trip_record.dart';
+import '../payment/bank_book.dart';
 import 'trip_receipt_dialog.dart';
 
 String _cash(num n) => n.round().toString()
@@ -8,10 +9,12 @@ String _cash(num n) => n.round().toString()
 
 class TripHistoryPage extends StatefulWidget {
   const TripHistoryPage({
-    super.key, required this.repository, required this.onQr,
+    super.key, required this.repository,
+    required this.bankBook, required this.onConfigureBank,
   });
   final TripRepository repository;
-  final Future<void> Function(int amountVnd) onQr;
+  final BankBook bankBook;
+  final Future<BankBook?> Function() onConfigureBank;
 
   @override
   State<TripHistoryPage> createState() => _TripHistoryPageState();
@@ -72,7 +75,8 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
     final selected = await showDialog<PaymentMethod>(
       context: context, builder: (ctx) => TripReceiptDialog(
         record: r,
-        onQr: () => widget.onQr(r.receipt.totalFare.round()),
+        bankBook: widget.bankBook,
+        onConfigureBank: widget.onConfigureBank,
       ),
     );
     if (selected == null || !mounted) return;

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import '../payment/bank_book.dart';
+import 'vietqr_payment_panel.dart';
 import '../domain/trip_record.dart';
 
 String _vnd(num n) => n.round().toString()
@@ -11,17 +12,26 @@ class TripReceiptDialog extends StatefulWidget {
   const TripReceiptDialog({
     super.key,
     required this.record,
-    this.onQr,
+    this.bankBook = const BankBook(),
+    this.onConfigureBank,
   });
   final TripRecord record;
-  final VoidCallback? onQr;
+  final BankBook bankBook;
+  final Future<BankBook?> Function()? onConfigureBank;
 
   @override
   State<TripReceiptDialog> createState() => _TripReceiptDialogState();
 }
 
 class _TripReceiptDialogState extends State<TripReceiptDialog> {
-  late PaymentMethod _method = widget.record.paymentMethod;
+  late PaymentMethod _method = widget.record.paymentMethod ==
+      PaymentMethod.card ? PaymentMethod.cash : widget.record.paymentMethod;
+  late BankBook _book = widget.bankBook;
+
+  Future<void> _editBank() async {
+    final newBook = await widget.onConfigureBank?.call();
+    if (mounted && newBook != null) setState(() => _book = newBook);
+  }
 
   Widget _line(String label, num value,
       {bool strong = false}) => Padding(
@@ -33,21 +43,6 @@ class _TripReceiptDialogState extends State<TripReceiptDialog> {
         fontWeight: strong ? FontWeight.w800 : FontWeight.w500)),
     ]),
   );
-
-  String _summary() {
-    final r = widget.record;
-    return 'TTX AATaximeter\n'
-      'Bắt đầu: ' + r.receipt.startedAt.toString() + '\n'
-      'Kết thúc: ' + r.receipt.endedAt.toString() + '\n'
-      'Điểm đón: ' + r.pickup + '\n'
-      'Điểm trả: ' + r.dropoff + '\n'
-      'Bảng giá: ' + r.fareProfileName + '\n'
-      'Loại xe: ' + r.vehicleType + '\n'
-      'Biển số: ' + r.vehiclePlate + '\n'
-      'Quãng đường: ' + r.receipt.distanceKm.toStringAsFixed(2) + ' km\n'
-      'Cước: ' + _vnd(r.receipt.totalFare) + '\n'
-      'Hình thức thanh toán: ' + _method.label;
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -96,15 +91,7 @@ class _TripReceiptDialogState extends State<TripReceiptDialog> {
                 ' km  •  Thời gian chờ: ' +
                 (r.waitingSeconds ~/ 60).toString() + ' phút'),
               const SizedBox(height: 8),
-              const Text('PHÍ CẦU ĐƯỜNG (BOT)',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 7),
-              if (r.tollFee <= 0)
-                const Text('Trạm thu phí là 0₫',
-                  key: Key('receipt-no-toll'),
-                  style: TextStyle(color: Colors.white70))
-              else
-                _line('Tổng phí trạm thu phí', r.tollFee),
+              _line('Trạm thu phí', r.tollFee),
               if (r.waitingFare > 0)
                 _line('Phí chờ', r.waitingFare),
               if (r.surcharge > 0)
@@ -115,28 +102,29 @@ class _TripReceiptDialogState extends State<TripReceiptDialog> {
               _line('TỔNG THANH TOÁN', r.totalFare, strong: true),
               const SizedBox(height: 8),
               const Text('Phương thức thanh toán đã chọn:'),
-              Wrap(spacing: 6, children: [
-                for (final method in PaymentMethod.values)
-                  ChoiceChip(label: Text(method.label),
+              Wrap(spacing: 7, children: [
+                for (final method in const [
+                  PaymentMethod.cash, PaymentMethod.bankTransfer,
+                ])
+                  ChoiceChip(
+                    label: Text(method.label),
                     selected: _method == method,
-                    onSelected: (_) => setState(() => _method = method)),
+                    onSelected: (_) => setState(() => _method = method),
+                  ),
               ]),
-              const SizedBox(height: 12),
-              if (widget.onQr != null)
-                OutlinedButton.icon(
-                  onPressed: widget.onQr,
-                  icon: const Icon(Icons.qr_code_2),
-                  label: const Text('Mã VietQR chuyển khoản')),
-              OutlinedButton.icon(
-                onPressed: () async {
-                  await Clipboard.setData(ClipboardData(text: _summary()));
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Đã sao chép biên lai')));
-                  }
-                },
-                icon: const Icon(Icons.copy),
-                label: const Text('Sao chép nội dung biên lai')),
+              if (_method == PaymentMethod.bankTransfer) ...[
+                const SizedBox(height: 10),
+                Container(
+                  color: Colors.white,
+                  padding: const EdgeInsets.all(8),
+                  child: VietQrPaymentPanel(
+                    book: _book,
+                    amountVnd: r.totalFare.round(),
+                    memo: 'TTX TAXI',
+                    onConfigure: _editBank,
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               FilledButton(
                 onPressed: () => Navigator.pop(context, _method),
