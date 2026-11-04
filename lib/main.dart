@@ -768,7 +768,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     );
     if (edited == null || !mounted || !_canChangeFare) return;
     final profile = TariffProfile(
-      id: 'huong_giang', label: edited.name,
+      id: 'huong_giang', label: 'Taxi Hương Giang',
       tariff: edited, verifiedByDriver: true,
     );
     await _applyCatalog(_tariffCatalog.save(profile).activate('huong_giang'));
@@ -991,17 +991,6 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                   : 'TAXI HƯƠNG GIANG • CHỌN NHANH'),
             ),
           ),
-          DashboardMap(
-            latitude: _mapLat,
-            longitude: _mapLon,
-            onLocate: _locateOnMap,
-          ),
-          const SizedBox(height: 8),
-          ReferenceSpeedometer(
-            speedKmh: meter.speedKmh,
-            speedLimitKmh: meter.tariff.speedLimitKmh,
-          ),
-          const SizedBox(height: 8),
           Container(
             padding: EdgeInsets.symmetric(
                 vertical: _carPreview ? 45 : 25, horizontal: 14),
@@ -1024,6 +1013,18 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
               Text(meter.tariff.name, style: const TextStyle(fontSize: 12)),
             ]),
           ),
+          const SizedBox(height: 8),
+          DashboardMap(
+            latitude: _mapLat,
+            longitude: _mapLon,
+            onLocate: _locateOnMap,
+          ),
+          const SizedBox(height: 8),
+          ReferenceSpeedometer(
+            speedKmh: meter.speedKmh,
+            speedLimitKmh: meter.tariff.speedLimitKmh,
+          ),
+          const SizedBox(height: 8),
           const SizedBox(height: 8),
           Row(children: [
             Expanded(child: _infoCard('Tốc độ', '${meter.speedKmh.toStringAsFixed(0)} km/h',

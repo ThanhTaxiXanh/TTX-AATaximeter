@@ -35,7 +35,9 @@ class _TariffCatalogPageState extends State<TariffCatalogPage> {
     if (!mounted || config == null) return;
     try {
       setState(() => catalog = catalog.save(TariffProfile(
-        id: profile.id, label: config.name,
+        id: profile.id,
+        label: profile.id == 'huong_giang'
+            ? 'Taxi Hương Giang' : config.name,
         tariff: config, verifiedByDriver: true,
       )));
       ScaffoldMessenger.of(context).showSnackBar(
