@@ -27,3 +27,10 @@ Không đính kèm APK gốc, tài sản âm thanh/ảnh QR của tác giả g�
 
 ## Bằng chứng video giao diện Taximeter Pro (04/11/2026)
 Đã xem hai video tham chiếu màn hình dọc 720×1600 và lập bảng thời gian, giá cước, hành vi và ma trận mức tương đồng ở [VIDEO_UI_REFERENCE.md](docs/VIDEO_UI_REFERENCE.md). Preset 4 chỗ trong mã lấy từ màn hình video (12.000đ mở cửa/0,5km, 14.500đ/km, 30.000đ/giờ chờ). Unit test `15km → 222.000đ` đối chiếu với video; **không** khẳng định chứng nhận pháp lý. Giao diện bổ sung vòng cung tốc độ, các nút BOT, báo giá có lộ trình, Car Mode/HUD trên điện thoại. Bản ghi không có hình ảnh Android Auto thật.
+
+## P1: biên lai, SQLite, VietQR và cấu hình (đang kiểm thử)
+- Hoàn tất chuyến → lưu vào SQLite (migrate lịch sử cũ từ SharedPreferences một lần) → hiển thị biên lai theo video.
+- Lịch sử đầy đủ với KPI doanh thu/km/số chuyến, xem biên lai, thay đổi lựa chọn phương thức thanh toán và xóa sau xác nhận.
+- VietQR theo tài khoản do người dùng tự nhập (mã BIN, tài khoản, chủ tài khoản). Nút `Tạo mã VietQR` mới tải ảnh từ img.vietqr.io và gửi thông tin thanh toán tới nhà cung cấp; **không xác nhận tiền đã nhận**.
+- Biểu giá/GPS mở rộng và lưu cấu hình, preset khác xe 4 chỗ thiếu một số ngưỡng nên gắn nhãn **chưa đủ thông số**.
+- **Giới hạn quan trọng:** chuyến đang chạy chưa khôi phục sau khi app bị kill; GPS chưa có foreground service; SQLite là bước cải tiến lưu chuyến kết thúc, không phải giải pháp an toàn kế toán tuyệt đối. Chưa triển khai Android Auto native.

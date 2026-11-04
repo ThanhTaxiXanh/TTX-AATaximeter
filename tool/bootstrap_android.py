@@ -11,6 +11,7 @@ ET.register_namespace("android", uri)
 tree = ET.parse(path)
 root = tree.getroot()
 for permission in [
+    "android.permission.INTERNET",
     "android.permission.ACCESS_COARSE_LOCATION",
     "android.permission.ACCESS_FINE_LOCATION",
 ]:
@@ -18,5 +19,8 @@ for permission in [
                and item.attrib.get("{" + uri + "}name") == permission
                for item in root):
         root.insert(0, ET.Element("uses-permission", {"{" + uri + "}name": permission}))
+app = root.find("application")
+if app is not None:
+    app.set("{" + uri + "}label", "TTX AATaximeter")
 tree.write(path, encoding="utf-8", xml_declaration=True)
 print("Android GPS permissions configured:", path)

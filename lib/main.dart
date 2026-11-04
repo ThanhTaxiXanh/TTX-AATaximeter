@@ -14,6 +14,8 @@ import 'src/payment/vietqr.dart';
 import 'src/ui/payment_dialogs.dart';
 import 'src/ui/trip_history_page.dart';
 import 'src/ui/trip_receipt_dialog.dart';
+import 'src/ui/tariff_settings_dialog.dart';
+import 'src/data/tariff_codec.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -98,6 +100,14 @@ class _TaximeterHomeState extends State<TaximeterHome> {
           if (found.isValid) account = found;
         } catch (_) {
           // Broken optional bank settings should never block completed trips.
+        }
+      }
+      final savedTariff = await store.getString('ttx_tariff_v1');
+      if (savedTariff != null) {
+        try {
+          meter.updateTariff(TariffCodec.decode(savedTariff));
+        } catch (_) {
+          // Invalid stored tariff does not replace the validated preset.
         }
       }
       if (!mounted) return;
@@ -390,51 +400,24 @@ class _TaximeterHomeState extends State<TaximeterHome> {
   }
 
   Future<void> _tariffDialog() async {
-    final base = TextEditingController(text: meter.tariff.baseFare.toStringAsFixed(0));
-    final km = TextEditingController(text: meter.tariff.perKmRate.toStringAsFixed(0));
-    final waiting = TextEditingController(text: meter.tariff.waitingFeePerHour.toStringAsFixed(0));
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Cấu hình biểu giá'),
-        content: SingleChildScrollView(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextField(controller: base, keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Giá mở cửa (đ)')),
-            TextField(controller: km, keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Cước km (đ/km)')),
-            TextField(controller: waiting, keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Phí chờ (đ/giờ)')),
-            const SizedBox(height: 12),
-            const Text('MVP: các ngưỡng quãng đường khác giữ theo biểu giá ví dụ. '
-                'Không thay đổi giá khi chuyến đang chạy.'),
-          ]),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false),
-              child: const Text('Hủy')),
-          FilledButton(onPressed: () => Navigator.pop(context, true),
-              child: const Text('Áp dụng')),
-        ],
-      ),
-    );
-    if (ok == true && mounted) {
-      try {
-        final next = meter.tariff.copyWith(
-          baseFare: double.parse(base.text),
-          perKmRate: double.parse(km.text),
-          waitingFeePerHour: double.parse(waiting.text),
-          name: 'Biểu giá của tôi',
-        );
-        setState(() => meter.updateTariff(next));
-        _notify('Đã cập nhật biểu giá phiên làm việc');
-      } catch (_) {
-        _notify('Chỉ được nhập số hợp lệ; không đổi giá giữa chuyến');
-      }
+    if (meter.status == MeterStatus.running ||
+        meter.status == MeterStatus.paused) {
+      _notify('Không được thay đổi biểu giá khi chuyến đang chạy');
+      return;
     }
-    base.dispose();
-    km.dispose();
-    waiting.dispose();
+    final chosen = await showDialog<TariffConfig>(
+      context: context,
+      builder: (ctx) => TariffSettingsDialog(current: meter.tariff),
+    );
+    if (chosen == null || !mounted) return;
+    try {
+      await store.setString('ttx_tariff_v1', TariffCodec.encode(chosen));
+      if (!mounted) return;
+      setState(() => meter.updateTariff(chosen));
+      _notify('Đã lưu biểu giá và cấu hình GPS cục bộ');
+    } catch (error) {
+      if (mounted) _notify('Không lưu được cấu hình: ' + error.toString());
+    }
   }
 
   void _showHistory() {
