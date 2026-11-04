@@ -300,7 +300,7 @@ class _TaximeterHomeState extends State<TaximeterHome> {
               padding: const EdgeInsets.symmetric(horizontal: 3),
               child: OutlinedButton(
                 onPressed: active ? () =>
-                    setState(() => meter.addToll(amount)) : null,
+                    setState(() => meter.addToll(amount.toDouble())) : null,
                 child: Text('BOT +${amount ~/ 1000}k',
                   style: const TextStyle(
                     color: Color(0xFF00D8F0), fontSize: 12)),
@@ -485,7 +485,7 @@ class _TaximeterHomeState extends State<TaximeterHome> {
           )),
           Card(child: ListTile(
             dense: true,
-            leading: const Icon(Icons.view_marquee,
+            leading: const Icon(Icons.campaign_outlined,
                 color: Color(0xFFFFB800)),
             title: const Text('● LED   CHÚC QUÝ KHÁCH THƯỢNG LỘ BÌNH AN',
               style: TextStyle(color: Color(0xFFFFB800), fontSize: 12)),
