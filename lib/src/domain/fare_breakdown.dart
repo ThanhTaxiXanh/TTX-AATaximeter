@@ -63,3 +63,19 @@ List<FareBreakdownLine> calculateFareBreakdown({
   }
   return List.unmodifiable(rows);
 }
+
+
+/// Dashboard: reveal opening at trip start, then each rate tier as its
+/// beginning kilometre is reached. The full engine always computes all
+/// bands, regardless of what the screen currently displays.
+List<FareBreakdownLine> reachedFareLines({
+  required TariffConfig tariff,
+  required double distanceKm,
+  required bool tripStarted,
+}) {
+  if (!tripStarted) return const <FareBreakdownLine>[];
+  return calculateFareBreakdown(
+    tariff: tariff, distanceKm: distanceKm, tripStarted: true,
+  ).where((line) => line.isOpening || distanceKm >= line.fromKm)
+      .toList(growable: false);
+}

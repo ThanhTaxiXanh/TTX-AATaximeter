@@ -52,6 +52,23 @@ void main() {
     expect(rows.every((row) => row.amount == 0), isTrue);
   });
 
+  test('dashboard hides tiers until reached, including at 0km', () {
+    expect(reachedFareLines(
+      tariff: price, distanceKm: 0, tripStarted: false), isEmpty);
+    expect(reachedFareLines(
+      tariff: price, distanceKm: 0, tripStarted: true).length, 1);
+    expect(reachedFareLines(
+      tariff: price, distanceKm: 1.49, tripStarted: true).length, 1);
+    expect(reachedFareLines(
+      tariff: price, distanceKm: 1.5, tripStarted: true).length, 2);
+    expect(reachedFareLines(
+      tariff: price, distanceKm: 29.99, tripStarted: true).length, 2);
+    expect(reachedFareLines(
+      tariff: price, distanceKm: 30, tripStarted: true).length, 3);
+    expect(reachedFareLines(
+      tariff: price, distanceKm: 45, tripStarted: true).length, 4);
+  });
+
   test('50km: final open-ended tier starts 45km', () {
     final rows = calculateFareBreakdown(
       tariff: price, distanceKm: 50, tripStarted: true);

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../domain/trip_record.dart';
-import 'fare_breakdown_section.dart';
 
 String _vnd(num n) => n.round().toString()
   .replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => '.') + ' đ';
@@ -97,31 +96,23 @@ class _TripReceiptDialogState extends State<TripReceiptDialog> {
                 ' km  •  Thời gian chờ: ' +
                 (r.waitingSeconds ~/ 60).toString() + ' phút'),
               const SizedBox(height: 8),
-              if (widget.record.tariffSnapshot != null)
-                FareBreakdownSection(
-                  tariff: widget.record.tariffSnapshot!,
-                  distanceKm: r.distanceKm,
-                  tripStarted: true,
-                  totalFare: r.totalFare,
-                  isFlatFare: r.isFlatFare,
-                  waitingFare: r.waitingFare,
-                  tollFee: r.tollFee,
-                  surcharge: r.surcharge,
-                  discount: r.discount,
-                )
-              else ...[
-                _line(r.isFlatFare ? 'Cước bao giá' : 'Cước mở cửa',
-                  r.baseFare),
-                if (!r.isFlatFare) ...[
-                  _line('Cước theo km', r.distanceFare),
-                  _line('Cước chờ', r.waitingFare),
-                ],
-                _line('Phí BOT', r.tollFee),
+              const Text('PHÍ CẦU ĐƯỜNG (BOT)',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 7),
+              if (r.tollFee <= 0)
+                const Text('Trạm thu phí là 0₫',
+                  key: Key('receipt-no-toll'),
+                  style: TextStyle(color: Colors.white70))
+              else
+                _line('Tổng phí trạm thu phí', r.tollFee),
+              if (r.waitingFare > 0)
+                _line('Phí chờ', r.waitingFare),
+              if (r.surcharge > 0)
                 _line('Phụ thu', r.surcharge),
+              if (r.discount > 0)
                 _line('Giảm giá', -r.discount),
-                const Divider(),
-                _line('TỔNG THANH TOÁN', r.totalFare, strong: true),
-              ],
+              const Divider(),
+              _line('TỔNG THANH TOÁN', r.totalFare, strong: true),
               const SizedBox(height: 8),
               const Text('Phương thức thanh toán đã chọn:'),
               Wrap(spacing: 6, children: [

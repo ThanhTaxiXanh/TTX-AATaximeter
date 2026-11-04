@@ -21,12 +21,14 @@ class FareBreakdownSection extends StatelessWidget {
     this.tollFee = 0,
     this.surcharge = 0,
     this.discount = 0,
+    this.showReachedOnly = false,
   });
   final TariffConfig tariff;
   final double distanceKm;
   final bool tripStarted;
   final double totalFare;
   final bool isFlatFare;
+  final bool showReachedOnly;
   final double waitingFare, tollFee, surcharge, discount;
 
   Widget _extra(String title, double amount) => Padding(
@@ -44,11 +46,16 @@ class FareBreakdownSection extends StatelessWidget {
     final items = calculateFareBreakdown(
       tariff: tariff, distanceKm: distanceKm, tripStarted: tripStarted,
     );
-    final displayed = isFlatFare ? const <FareBreakdownLine>[] : items;
-    final openingAndDistance = displayed.fold<double>(
-      0, (total, line) => total + line.amount);
+    final displayed = isFlatFare ? const <FareBreakdownLine>[]
+        : showReachedOnly
+          ? reachedFareLines(
+              tariff: tariff, distanceKm: distanceKm,
+              tripStarted: tripStarted)
+          : items;
+     // Use complete pricing even if a screen deliberately hides future tiers.
+    final charged = items.fold<double>(0, (sum, line) => sum + line.amount);
     final raw = isFlatFare ? totalFare
-        : openingAndDistance + waitingFare + tollFee + surcharge - discount;
+        : charged + waitingFare + tollFee + surcharge - discount;
     final rounding = totalFare - raw;
 
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [

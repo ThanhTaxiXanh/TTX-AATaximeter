@@ -11,6 +11,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'src/core/taximeter_engine.dart';
 import 'src/core/location_tracking_policy.dart';
 import 'src/ui/fare_breakdown_section.dart';
+import 'src/domain/toll_schedule.dart';
+import 'src/ui/toll_schedule_dialog.dart';
 import 'src/ui/quote_dialog.dart';
 import 'src/data/trip_repository.dart';
 import 'src/domain/trip_record.dart';
@@ -79,6 +81,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   final SharedPreferencesAsync store = SharedPreferencesAsync();
   final TripRepository repository = TripRepository();
   TariffCatalog _tariffCatalog = TariffCatalog.initial();
+  TollSchedule _tollSchedule = const TollSchedule();
   double? _mapLat;
   double? _mapLon;
   bool _storageReady = false;
@@ -130,6 +133,15 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           // Broken optional bank settings should never block completed trips.
         }
       }
+      TollSchedule tollSchedule = const TollSchedule();
+      final storedTolls = await store.getString('ttx_toll_schedule_v1');
+      if (storedTolls != null) {
+        try {
+          tollSchedule = TollSchedule.decode(storedTolls);
+        } catch (_) {
+          // Invalid optional presets should not block receipt recovery.
+        }
+      }
       VehicleRegistration? registration;
       final rawVehicle = await store.getString('ttx_vehicle_v1');
       if (rawVehicle != null) {
@@ -174,6 +186,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         _bank = account;
         _vehicle = registration;
         _tariffCatalog = catalog;
+        _tollSchedule = tollSchedule;
         _storageReady = true;
       });
       await CarStateBridge.publish(meter);
@@ -562,6 +575,63 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       return;
     }
     if (mounted) await _enableGps();
+  }
+
+  Future<void> _configureTollSchedule() async {
+    final updated = await showDialog<TollSchedule>(
+      context: context,
+      builder: (ctx) => TollScheduleDialog(initial: _tollSchedule),
+    );
+    if (updated == null || !mounted) return;
+    try {
+      await store.setString('ttx_toll_schedule_v1', updated.encode());
+      if (mounted) {
+        setState(() => _tollSchedule = updated);
+        _notify('Đã lưu bảng giá phí BOT');
+      }
+    } catch (error) {
+      if (mounted) _notify('Lỗi lưu biểu giá BOT: ' + error.toString());
+    }
+  }
+
+  Future<void> _chooseTollFromSchedule() async {
+    if (meter.status != MeterStatus.running &&
+        meter.status != MeterStatus.paused) {
+      _notify('Chỉ cộng BOT vào chuyến đang chạy');
+      return;
+    }
+    if (_tollSchedule.rates.isEmpty) {
+      await _configureTollSchedule();
+      return;
+    }
+    final selected = await showModalBottomSheet<TollRate>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(child: ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.all(12),
+        children: [
+          const Text('CHỌN TRẠM BOT ĐÃ ĐI QUA',
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+          const Text('Chỉ cộng vào cước khi bạn xác nhận.',
+            style: TextStyle(color: Colors.white60)),
+          for (final rate in _tollSchedule.rates)
+            ListTile(
+              title: Text(rate.label),
+              subtitle: Text(vnd(rate.amount)),
+              leading: const Icon(Icons.toll),
+              onTap: () => Navigator.pop(ctx, rate),
+            ),
+        ],
+      )),
+    );
+    if (!mounted || selected == null ||
+        (meter.status != MeterStatus.running &&
+        meter.status != MeterStatus.paused)) return;
+    setState(() => meter.addToll(selected.amount));
+    _checkpoint(force: true);
+    _notify('Đã cộng BOT: ' + selected.label + ' • ' +
+        vnd(selected.amount));
   }
 
   Future<void> _customTollDialog() async {
@@ -999,30 +1069,28 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                   style: TextStyle(color: Colors.white70)),
             ],
           )),
-          const SizedBox(width: 4),
-          const Icon(Icons.keyboard_arrow_down, color: Colors.white),
-        ]),
+         ]),
       ),
     );
   }
 
   Widget _mainFareCard() => Container(
     width: double.infinity,
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 22),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
     decoration: BoxDecoration(
       color: const Color(0xFF202023),
       borderRadius: BorderRadius.circular(16)),
     child: Column(children: [
       const Text('Thành tiền', style: TextStyle(
         color: Colors.white60, fontSize: 14)),
-      const SizedBox(height: 5),
+      const SizedBox(height: 2),
       FittedBox(
         fit: BoxFit.scaleDown,
         child: Text(vnd(meter.totalFare),
           key: const Key('live-fare-total'),
           style: const TextStyle(
             color: Color(0xFFFF4549),
-            fontSize: 59,
+            fontSize: 40,
             fontWeight: FontWeight.w900,
             fontFeatures: [FontFeature.tabularFigures()],
           )),
@@ -1049,6 +1117,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         return;
       case 'toll':
         _customTollDialog();
+        return;
+      case 'tollSchedule':
+        _configureTollSchedule();
         return;
       default:
         return;
@@ -1091,6 +1162,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                 child: Text('Chế độ Car Mode / HUD trên điện thoại')),
               PopupMenuItem(value: 'toll',
                 child: Text('Nhập phí BOT tùy chỉnh')),
+              PopupMenuItem(value: 'tollSchedule',
+                child: Text('Cài đặt bảng giá phí cầu đường (BOT)')),
             ],
             icon: const Icon(Icons.more_vert),
           ),
@@ -1105,30 +1178,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             speedLimitKmh: meter.tariff.speedLimitKmh,
             onLocate: _locateOnMap,
           ),
-          const SizedBox(height: 7),
-          if (_gpsStatus.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(left: 3, bottom: 7),
-              child: Text(_gpsStatus,
-                maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white54, fontSize: 11)),
-            ),
-          if (status == MeterStatus.idle)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: TextField(
-                controller: _destinationController,
-                decoration: const InputDecoration(
-                  hintText: 'Nhập địa chỉ điểm đến...',
-                  hintStyle: TextStyle(color: Colors.white38),
-                  filled: true, fillColor: Color(0xFF141417),
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 13),
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ),
+          const SizedBox(height: 9),
           _selectedCompanyCard(status),
           const SizedBox(height: 10),
           _mainFareCard(),
@@ -1191,24 +1241,21 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                     style: TextStyle(fontWeight: FontWeight.bold)),
                 ))),
             ]),
-            ExpansionTile(
-              title: const Text('Phí BOT / phụ thu', style: TextStyle(
-                fontSize: 13, color: Colors.white70)),
-              dense: true,
-              children: [
-                Wrap(spacing: 6, children: [
-                  for (final fee in [10000, 20000, 35000, 50000])
-                    ActionChip(
-                      label: Text('+' + (fee ~/ 1000).toString() + 'k'),
-                      onPressed: () {
-                        setState(() => meter.addToll(fee.toDouble()));
-                        _checkpoint(force: true);
-                      },
-                    ),
-                  ActionChip(label: const Text('Tùy chỉnh'),
-                    onPressed: _customTollDialog),
-                ]),
-              ],
+            Padding(
+              padding: const EdgeInsets.only(top: 7),
+              child: Row(children: [
+                Expanded(child: OutlinedButton.icon(
+                  onPressed: _chooseTollFromSchedule,
+                  icon: const Icon(Icons.toll),
+                  label: const Text('Chọn trạm BOT'),
+                )),
+                const SizedBox(width: 8),
+                Expanded(child: OutlinedButton.icon(
+                  onPressed: _customTollDialog,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Nhập phí khác'),
+                )),
+              ]),
             ),
           ],
           if (status == MeterStatus.finished)
@@ -1251,22 +1298,25 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                 }),
                 icon: const Icon(Icons.refresh)),
             ),
-          const SizedBox(height: 12),
-          const Text('Chi tiết tính tiền',
-            style: TextStyle(fontSize: 19,
-              fontWeight: FontWeight.w800, color: Colors.white)),
-          const SizedBox(height: 10),
-          FareBreakdownSection(
-            tariff: meter.tariff,
-            distanceKm: meter.distanceKm,
-            tripStarted: status != MeterStatus.idle,
-            totalFare: meter.totalFare,
-            isFlatFare: meter.flatFare != null,
-            waitingFare: meter.waitingFare,
-            tollFee: meter.tollFee,
-            surcharge: meter.surcharge,
-            discount: meter.discount,
-          ),
+          if (active) ...[
+            const SizedBox(height: 12),
+            const Text('Chi tiết tính tiền',
+              style: TextStyle(fontSize: 18,
+                fontWeight: FontWeight.w800, color: Colors.white)),
+            const SizedBox(height: 8),
+            FareBreakdownSection(
+              tariff: meter.tariff,
+              distanceKm: meter.distanceKm,
+              tripStarted: true,
+              showReachedOnly: true,
+              totalFare: meter.totalFare,
+              isFlatFare: meter.flatFare != null,
+              waitingFare: meter.waitingFare,
+              tollFee: meter.tollFee,
+              surcharge: meter.surcharge,
+              discount: meter.discount,
+            ),
+          ],
           const SizedBox(height: 6),
           const Center(child: Text(
             'Phiên bản thử nghiệm • Chưa sử dụng thu cước thương mại',
