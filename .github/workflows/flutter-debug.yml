@@ -1,0 +1,32 @@
+name: Flutter MVP Debug APK
+on:
+  push:
+    branches: [main, feature/flutter-taximeter-foundation]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Android project
+        run: flutter create . --platforms=android --project-name ttx_aataximeter --org vn.thanhtaxixanh
+      - name: Inject GPS permissions
+        run: python3 tool/bootstrap_android.py
+      - name: Resolve dependencies
+        run: flutter pub get
+      - name: Run unit tests
+        run: flutter test
+      - name: Build DEBUG APK (not Android Auto enabled)
+        run: flutter build apk --debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ttx-aataximeter-mvp-debug
+          path: build/app/outputs/flutter-apk/app-debug.apk
