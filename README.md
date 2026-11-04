@@ -4,7 +4,8 @@
 
 ## Tiến độ
 - **Đã có:** báo cáo phân tích APK, máy trạng thái đồng hồ cước, biểu giá phân đoạn, phí chờ/BOT/phụ thu/giảm giá, giá cố định, unit tests, giao diện MVP và GPS foreground.
-- **Chưa có/không tuyên bố hoạt động:** Android Auto host, lưu SQLite lâu dài, toàn bộ settings/QR/LED/MP3/biên lai hoàn chỉnh, đảm bảo tính cước khi app chạy nền, APK release đã ký.
+- **Đã có (bản thử nghiệm):** SQLite lưu lịch sử/khôi phục cuốc, biên lai, VietQR do tài xế cấu hình, một phần cài đặt, GPS Foreground Service và Kotlin display bridge.
+- **Chưa hoàn thành:** Android Auto host thực, màn hình LED/MP3/TTS đầy đủ, theo dõi nền ổn định sau khi Android kill tiến trình, tính cước được kiểm định và APK release đã ký.
 - Các con số trong `TariffConfig.demo()` là **minh họa**, không phải biểu giá mặc định đã đối chiếu được từ APK gốc.
 
 ## Xây dựng
@@ -33,7 +34,7 @@ Không đính kèm APK gốc, tài sản âm thanh/ảnh QR của tác giả g�
 - Lịch sử đầy đủ với KPI doanh thu/km/số chuyến, xem biên lai, thay đổi lựa chọn phương thức thanh toán và xóa sau xác nhận.
 - VietQR theo tài khoản do người dùng tự nhập (mã BIN, tài khoản, chủ tài khoản). Nút `Tạo mã VietQR` mới tải ảnh từ img.vietqr.io và gửi thông tin thanh toán tới nhà cung cấp; **không xác nhận tiền đã nhận**.
 - Biểu giá/GPS mở rộng và lưu cấu hình, preset khác xe 4 chỗ thiếu một số ngưỡng nên gắn nhãn **chưa đủ thông số**.
-- **Giới hạn quan trọng:** chuyến đang chạy chưa khôi phục sau khi app bị kill; GPS chưa có foreground service; SQLite là bước cải tiến lưu chuyến kết thúc, không phải giải pháp an toàn kế toán tuyệt đối. Chưa triển khai Android Auto native.
+- **Giới hạn quan trọng:** chuyến được khôi phục ở trạng thái tạm ngắt sau khi app bị kill và chỉ tiếp tục khi người dùng xác nhận. GPS dùng Foreground Service khi plugin hoạt động; điều này không bảo đảm chạy xuyên suốt mọi trạng thái của Android. Chưa có Android Auto host hoạt động.
 
 ## Giai đoạn phục hồi chuyến và native Kotlin (đang kiểm thử)
 - `TripSessionSnapshot` chứa biểu giá nguyên gốc, tổng cước, trạng thái chuyến và lộ trình; mỗi 3 giây tạo checkpoint vào SQLite. Khi app bị đưa xuống nền hoặc khởi động lại, phiên tính cước được **tạm ngắt** và yêu cầu tài xế tiếp tục. Khoảng thời gian không có GPS tin cậy không tự tạo phí chờ/km.
@@ -47,3 +48,8 @@ Không đính kèm APK gốc, tài sản âm thanh/ảnh QR của tác giả g�
 - Khi hoàn tất chuyến hủy subscription, dừng FGS theo cơ chế Geolocator. Không lấy mẫu vị trí sai số lớn, nhảy GPS hoặc cũ làm tín hiệu đáng tin cậy. Mất tín hiệu quá ngưỡng tạm ngắt và yêu cầu tiếp tục thủ công.
 - Chưa bảo đảm dịch vụ tiếp tục chạy sau **force stop/process kill** hoặc chính sách tiết kiệm pin của OEM. SQLite phục hồi ở trạng thái tạm ngắt, không tự cộng thời gian hoặc km không quan sát được.
 - Chưa kiểm chứng trên điện thoại Android thật; kiểm thử màn hình tắt, chuyển app, quyền GPS, MIUI battery saver, vùng GPS yếu, cả khi kết nối Android Auto.
+
+## Giao diện đăng ký xe (video 1)
+Lần mở đầu sẽ hiện hộp thoại chọn Xe 4 Chỗ / Xe 7 Chỗ / Xe 16 Chỗ và nhập biển số. Dữ liệu lưu cục bộ bằng `SharedPreferencesAsync`; không sao chép biển số từ video. Nút hình ô tô trên thanh trên cho phép chỉnh lại. Chưa tự suy ra hoặc tự chuyển biểu giá theo loại xe vì các preset khác mẫu bốn chỗ chưa được xác minh đầy đủ.
+
+Chi tiết GPS nền và bài thử nghiệm trên thiết bị: [DEVICE_TEST_PLAN.md](docs/DEVICE_TEST_PLAN.md).

@@ -21,6 +21,8 @@ import 'src/ui/tariff_settings_dialog.dart';
 import 'src/data/tariff_codec.dart';
 import 'src/data/trip_session_snapshot.dart';
 import 'src/platform/car_state_bridge.dart';
+import 'src/domain/vehicle_registration.dart';
+import 'src/ui/vehicle_registration_dialog.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -79,6 +81,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   String? _checkpointError;
   TripRecord? _pendingUnsaved;
   VietQrAccount? _bank;
+  VehicleRegistration? _vehicle;
+  bool _vehicleDialogOpen = false;
   String _tripPickup = '';
   String _tripDropoff = '';
   Timer? _ticker;
@@ -115,6 +119,15 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           // Broken optional bank settings should never block completed trips.
         }
       }
+      VehicleRegistration? registration;
+      final rawVehicle = await store.getString('ttx_vehicle_v1');
+      if (rawVehicle != null) {
+        try {
+          registration = VehicleRegistration.decode(rawVehicle);
+        } catch (_) {
+          // Never trust a malformed registration. Re-prompt explicitly.
+        }
+      }
       final savedTariff = await store.getString('ttx_tariff_v1');
       if (savedTariff != null) {
         try {
@@ -134,9 +147,17 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       if (!mounted) return;
       setState(() {
         _bank = account;
+        _vehicle = registration;
         _storageReady = true;
       });
       await CarStateBridge.publish(meter);
+      if (registration == null && mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _vehicle == null) {
+            _configureVehicle();
+          }
+        });
+      }
     } catch (error) {
       if (!mounted) return;
       _notify('Lỗi khởi tạo lịch sử SQLite: ' + error.toString());
@@ -394,6 +415,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
 
   Future<void> _start() async {
     if (meter.status != MeterStatus.idle || !_storageReady) return;
+    if (_vehicle == null && !await _configureVehicle()) return;
+    if (!mounted || meter.status != MeterStatus.idle) return;
     if (!await _requestLocationReady()) return;
     if (!mounted || !_appVisible || meter.status != MeterStatus.idle) return;
     final now = DateTime.now();
@@ -471,6 +494,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       _notify('Hoàn thành chuyến hiện tại và chờ dữ liệu sẵn sàng trước khi báo giá');
       return;
     }
+    if (_vehicle == null && !await _configureVehicle()) return;
+    if (!mounted || meter.status != MeterStatus.idle) return;
     final quote = await showDialog<QuoteResult>(
       context: context,
       builder: (context) => QuoteDialog(tariff: meter.tariff),
@@ -693,6 +718,29 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     ));
   }
 
+  Future<bool> _configureVehicle() async {
+    if (!mounted || _vehicleDialogOpen) return false;
+    _vehicleDialogOpen = true;
+    try {
+      final registration = await showDialog<VehicleRegistration>(
+        context: context,
+        builder: (dialogContext) =>
+            VehicleRegistrationDialog(initial: _vehicle),
+      );
+      if (registration == null || !mounted) return false;
+      await store.setString('ttx_vehicle_v1', registration.encode());
+      if (!mounted) return false;
+      setState(() => _vehicle = registration);
+      _notify('Đã lưu thông tin xe: ' + registration.plate);
+      return true;
+    } catch (error) {
+      if (mounted) _notify('Không lưu được thông tin xe: ' + error.toString());
+      return false;
+    } finally {
+      _vehicleDialogOpen = false;
+    }
+  }
+
   Future<VietQrAccount?> _configureBank() async {
     final chosen = await showDialog<VietQrAccount>(
       context: context,
@@ -769,6 +817,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         actions: [
           IconButton(onPressed: _showHistory,
             icon: const Icon(Icons.history), tooltip: 'Lịch sử'),
+          IconButton(onPressed: () { _configureVehicle(); },
+            icon: const Icon(Icons.directions_car),
+            tooltip: 'Đăng ký xe / biển số'),
           IconButton(onPressed: _configureBank,
             icon: const Icon(Icons.account_balance),
             tooltip: 'Tài khoản VietQR'),
@@ -803,6 +854,19 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                   _checkpointError = null;
                   _checkpoint(force: true);
                 })),
+            )),
+          if (_vehicle != null)
+            Card(child: ListTile(
+              dense: true,
+              leading: const Icon(Icons.local_taxi,
+                  color: Color(0xFFFFB800)),
+              title: Text(_vehicle!.category.label + ' • ' + _vehicle!.plate,
+                style: const TextStyle(fontWeight: FontWeight.w700)),
+              trailing: IconButton(
+                onPressed: () { _configureVehicle(); },
+                icon: const Icon(Icons.edit_outlined),
+                tooltip: 'Chỉnh thông tin xe',
+              ),
             )),
           Card(child: ListTile(
             leading: const Icon(Icons.gps_fixed, color: Color(0xFF00DA75)),
