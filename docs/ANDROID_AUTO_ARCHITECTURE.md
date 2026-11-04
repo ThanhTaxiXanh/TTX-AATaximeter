@@ -32,3 +32,12 @@ Nguồn chính thức:
 - https://developer.android.com/jetpack/androidx/releases/car-app
 - https://developer.android.com/training/cars/apps/library/set-up-project
 - https://developer.android.com/training/cars/apps/navigation
+
+## GPS Foreground Service thử nghiệm (0.3)
+`geolocator_android` tự cung cấp location foreground service khi khởi tạo stream với `foregroundNotificationConfig`. Đây là **dịch vụ GPS của plugin**; khác với `TtxCarAppService` Kotlin vẫn chưa được đăng ký Android Auto.
+- Khởi động GPS service khi Activity hiển thị, sau khi được người dùng cấp quyền vị trí; trên Android 14+ cần loại foreground service `location` và `FOREGROUND_SERVICE_LOCATION`. `POST_NOTIFICATIONS` chỉ liên quan quyền hiển thị thông báo ở Android 13+, cần đánh giá UX riêng.
+- Tệp Android manifest bổ sung `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, `WAKE_LOCK`, `ACCESS_FINE_LOCATION` và `ACCESS_COARSE_LOCATION`. Plugin tự merge service declaration.
+- Khi chạy nền và tín hiệu còn mới, luồng vị trí vẫn được xử lý bằng cùng một bộ tính cước Dart. Khi không có vị trí tin cậy quá 12 giây hoặc trước khi có fix đầu quá 30 giây, tạm ngắt và checkpoint SQLite. Đây là an toàn giới hạn, không phải cam kết thu cước không mất điểm trong trường hợp hệ thống kill app.
+- Không thêm `ACCESS_BACKGROUND_LOCATION` vào manifest bản này: luồng service chỉ bắt đầu từ app visible rồi tiếp tục chạy khi chuyển nền. Không khởi chạy FGS từ nền không có quyền.
+- Phải kiểm tra thiết bị thật các trường hợp màn hình tắt, ứng dụng đa nhiệm, tắt GPS, từ chối quyền, hệ thống tiết kiệm pin, FGS notification, ghi trùng vị trí và gián đoạn dài.
+- Tài liệu chính thức: https://pub.dev/packages/geolocator ; https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start

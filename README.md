@@ -40,3 +40,10 @@ Không đính kèm APK gốc, tài sản âm thanh/ảnh QR của tác giả g�
 - Chuyến kết thúc và xóa snapshot được commit **cùng một SQLite transaction**, giảm rủi ro mất chuyến khi bị đóng bất ngờ.
 - Native bridge `MainActivity.kt` đồng bộ trạng thái hiển thị tới `CarStateStore`; `TtxCarAppService`, `TtxCarScreen` chuẩn bị Car App Library 1.7.0 và **chưa đăng ký service** vì đồng hồ cước độc lập không có danh mục Android Auto đã xác nhận. Xem `docs/ANDROID_AUTO_ARCHITECTURE.md`.
 - Chưa thể tính cước liên tục khi ứng dụng không được cấp foreground location service; bản này ưu tiên không thu phí sai hơn là giả lập đường đi trong thời gian mất tín hiệu.
+
+## Giai đoạn 0.3: GPS Foreground Service (thử nghiệm Android)
+- Dùng `geolocator_android.AndroidSettings(foregroundNotificationConfig: ...)` để khởi động foreground service **loại `location`** do plugin Geolocator quản lý. Có thông báo liên tục và wakelock khi chuyến đang hoạt động; không tạo thêm GPS service Kotlin thứ hai.
+- Chỉ xin quyền từ màn hình đang hiển thị, trước khi bắt đầu/tiếp tục chuyến. Không tự yêu cầu `ACCESS_BACKGROUND_LOCATION` hay tự khởi động dịch vụ mới khi đã vào nền.
+- Khi hoàn tất chuyến hủy subscription, dừng FGS theo cơ chế Geolocator. Không lấy mẫu vị trí sai số lớn, nhảy GPS hoặc cũ làm tín hiệu đáng tin cậy. Mất tín hiệu quá ngưỡng tạm ngắt và yêu cầu tiếp tục thủ công.
+- Chưa bảo đảm dịch vụ tiếp tục chạy sau **force stop/process kill** hoặc chính sách tiết kiệm pin của OEM. SQLite phục hồi ở trạng thái tạm ngắt, không tự cộng thời gian hoặc km không quan sát được.
+- Chưa kiểm chứng trên điện thoại Android thật; kiểm thử màn hình tắt, chuyển app, quyền GPS, MIUI battery saver, vùng GPS yếu, cả khi kết nối Android Auto.

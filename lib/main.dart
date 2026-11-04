@@ -2,10 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:geolocator_android/geolocator_android.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'src/core/taximeter_engine.dart';
+import 'src/core/location_tracking_policy.dart';
 import 'src/ui/reference_speedometer.dart';
 import 'src/ui/quote_dialog.dart';
 import 'src/data/trip_repository.dart';
@@ -80,6 +83,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   String _tripDropoff = '';
   Timer? _ticker;
   StreamSubscription<Position>? _gps;
+  final LocationTrackingPolicy _trackingPolicy = LocationTrackingPolicy();
+  bool _gpsStarting = false;
+  bool _appVisible = true;
   bool _carPreview = false;
   bool _carMirror = false;
   String _gpsStatus = 'Chưa kích hoạt GPS';
@@ -91,8 +97,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     _initializeData();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
-      setState(() => meter.tick(DateTime.now()));
-      _checkpoint();
+      _meterTick(DateTime.now());
     });
   }
 
@@ -153,12 +158,17 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     );
   }
 
-  Future<void> _enableGps() async {
-    if (_gps != null) return;
+  /// Foreground-only permission flow: location FGS must start from a visible
+  /// activity on Android 12+/14+ unless Android grants a specific exemption.
+  Future<bool> _requestLocationReady() async {
+    if (!_appVisible || !mounted) return false;
     try {
       if (!await Geolocator.isLocationServiceEnabled()) {
-        setState(() => _gpsStatus = 'GPS đang tắt: bật Dịch vụ vị trí');
-        return;
+        if (mounted) {
+          setState(() => _gpsStatus = 'GPS tắt: vui lòng bật Dịch vụ vị trí');
+          _notify('Hãy bật GPS trước khi bắt đầu hoặc tiếp tục chuyến');
+        }
+        return false;
       }
       var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
@@ -166,48 +176,164 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       }
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
-        setState(() => _gpsStatus = 'Chưa được cấp quyền vị trí');
+        if (mounted) {
+          setState(() => _gpsStatus = 'Chưa có quyền vị trí');
+          _notify('Cấp quyền vị trí chính xác trong Cài đặt Android');
+        }
+        return false;
+      }
+      return mounted && _appVisible;
+    } catch (error) {
+      if (mounted) {
+        setState(() => _gpsStatus = 'Không kiểm tra được quyền GPS');
+        _notify('GPS: $error');
+      }
+      return false;
+    }
+  }
+
+  Future<void> _stopGps() async {
+    final subscription = _gps;
+    _gps = null;
+    _trackingPolicy.clear();
+    if (subscription != null) {
+      try {
+        await subscription.cancel();
+      } catch (_) {
+        // A broken platform subscription must not affect the final receipt.
+      }
+    }
+  }
+
+  void _suspendForGps(String reason) {
+    if (!mounted) return;
+    final active = meter.status == MeterStatus.running ||
+        meter.status == MeterStatus.paused;
+    if (active) {
+      final now = DateTime.now();
+      setState(() {
+        meter.skipUntrustedInterval(now);
+        meter.suspendForInterruption(at: now);
+        _gpsStatus = reason;
+      });
+      _checkpoint(force: true);
+    }
+    unawaited(_stopGps());
+  }
+
+  void _meterTick(DateTime now) {
+    if (meter.status == MeterStatus.running) {
+      if (_trackingPolicy.shouldSuspend(now)) {
+        _suspendForGps('GPS mất tín hiệu: đã tạm ngắt tính cước');
         return;
       }
-      setState(() => _gpsStatus = 'Đang dò tín hiệu GPS...');
-      _gps = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.bestForNavigation,
-          distanceFilter: 1,
-        ),
-      ).listen((position) {
-        if (!mounted) return;
-        setState(() {
-          meter.acceptGps(GpsFix(
-            latitude: position.latitude,
-            longitude: position.longitude,
-            speedKmh: position.speed * 3.6,
-            accuracyMeters: position.accuracy,
-            timestamp: position.timestamp,
-          ));
-          _gpsStatus = position.accuracy <= meter.tariff.gpsMaxAccuracyMeters
-              ? 'GPS ±${position.accuracy.toStringAsFixed(0)} m'
-              : 'GPS yếu ±${position.accuracy.toStringAsFixed(0)} m';
-        });
-      }, onError: (Object error) {
-        if (mounted) setState(() => _gpsStatus = 'Lỗi GPS: $error');
+      setState(() {
+        if (_trackingPolicy.hasRecentFix(now)) {
+          meter.tick(now);
+        } else {
+          // Before GPS lock / during stale periods do not charge waiting.
+          meter.skipUntrustedInterval(now);
+        }
       });
-    } catch (e) {
-      if (mounted) setState(() => _gpsStatus = 'Không mở được GPS: $e');
+    } else if (meter.status == MeterStatus.paused) {
+      // Manual pause accrues waiting; interrupted pause never does.
+      setState(() => meter.tick(now));
+    }
+    _checkpoint();
+  }
+
+  /// Geolocator's AndroidSettings spawns a location-type FGS with a
+  /// persistent visible notification when the app moves to background.
+  Future<bool> _enableGps() async {
+    if (_gps != null) return true;
+    if (_gpsStarting) return false;
+    _gpsStarting = true;
+    try {
+      if (!await _requestLocationReady()) {
+        _suspendForGps('Không thể bật GPS: thiếu quyền hoặc dịch vụ vị trí');
+        return false;
+      }
+      if (!mounted || !_appVisible) {
+        _suspendForGps('Ứng dụng đã ra nền trước khi GPS khởi động');
+        return false;
+      }
+      final settings = defaultTargetPlatform == TargetPlatform.android
+          ? AndroidSettings(
+              accuracy: LocationAccuracy.bestForNavigation,
+              distanceFilter: 1,
+              intervalDuration: const Duration(seconds: 2),
+              foregroundNotificationConfig: const ForegroundNotificationConfig(
+                notificationTitle: 'TTX AATaximeter • Đang tính cước',
+                notificationText:
+                    'GPS đang ghi nhận quãng đường. Mở ứng dụng để kết thúc chuyến.',
+                notificationChannelName: 'Đồng hồ taxi - GPS chuyến đi',
+                enableWakeLock: true,
+                setOngoing: true,
+              ),
+            )
+          : const LocationSettings(
+              accuracy: LocationAccuracy.bestForNavigation,
+              distanceFilter: 1,
+            );
+      setState(() => _gpsStatus = 'GPS nền: đang chờ vị trí chính xác...');
+      _gps = Geolocator.getPositionStream(locationSettings: settings)
+          .listen((position) {
+        if (!mounted) return;
+        final now = DateTime.now();
+        final age = now.difference(position.timestamp);
+        // A cached or future fix must not refresh the GPS watchdog.
+        if (age.isNegative && age.abs() > const Duration(seconds: 3)) return;
+        if (age > const Duration(seconds: 12)) return;
+        final accepted = meter.acceptGps(GpsFix(
+          latitude: position.latitude,
+          longitude: position.longitude,
+          speedKmh: position.speed * 3.6,
+          accuracyMeters: position.accuracy,
+          timestamp: position.timestamp,
+        ));
+        if (!accepted) {
+          if (meter.status == MeterStatus.running) {
+            setState(() => _gpsStatus = 'GPS yếu / sai số: đang chờ tín hiệu');
+          }
+          return;
+        }
+        _trackingPolicy.acceptedFix(now);
+        setState(() {
+          _gpsStatus = 'GPS nền ±' +
+              position.accuracy.toStringAsFixed(0) + ' m';
+        });
+        _checkpoint();
+      }, onError: (Object error) {
+        _suspendForGps('Dịch vụ GPS lỗi: $error');
+      }, onDone: () {
+        if (_gps != null && meter.status == MeterStatus.running) {
+          _suspendForGps('Dịch vụ GPS đã dừng ngoài dự kiến');
+        }
+      });
+      return true;
+    } catch (error) {
+      _suspendForGps('Không khởi động được GPS nền: $error');
+      return false;
+    } finally {
+      _gpsStarting = false;
     }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if ((state == AppLifecycleState.paused ||
-         state == AppLifecycleState.hidden) &&
-        (meter.status == MeterStatus.running ||
-         meter.status == MeterStatus.paused)) {
-      setState(() => meter.suspendForInterruption());
-      _checkpoint(force: true);
-      _gps?.cancel();
-      _gps = null;
+    _appVisible = state != AppLifecycleState.hidden &&
+        state != AppLifecycleState.paused;
+    if (state != AppLifecycleState.hidden &&
+        state != AppLifecycleState.paused) return;
+    if (meter.status != MeterStatus.running &&
+        meter.status != MeterStatus.paused) return;
+    final safe = _trackingPolicy.canLeaveForeground(DateTime.now(),
+        streamSubscribed: _gps != null);
+    if (!safe) {
+      _suspendForGps('GPS chưa sẵn sàng khi ra nền: chuyến đã tạm ngắt');
     }
+    // If the service keeps providing fresh fixes, meter and checkpoint continue.
+    // Crash recovery is still conservative: restore as paused.
   }
 
   String _sessionPayload() => TripSessionSnapshot.fromEngine(
@@ -250,20 +376,37 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
 
   Future<void> _start() async {
     if (meter.status != MeterStatus.idle || !_storageReady) return;
+    if (!await _requestLocationReady()) return;
+    if (!mounted || !_appVisible || meter.status != MeterStatus.idle) return;
+    final now = DateTime.now();
     _tripPickup = '';
     _tripDropoff = '';
-    setState(() => meter.start());
+    setState(() => meter.start(at: now));
+    _trackingPolicy.begin(now);
     if (!await _saveNewTrip()) {
       if (mounted) setState(meter.reset);
+      _trackingPolicy.clear();
       return;
     }
-    if (mounted) _enableGps();
+    if (mounted) await _enableGps();
+  }
+
+  Future<void> _resumeTrip() async {
+    if (meter.status != MeterStatus.paused) return;
+    if (!await _requestLocationReady()) return;
+    if (!mounted || !_appVisible || meter.status != MeterStatus.paused) return;
+    final now = DateTime.now();
+    setState(() => meter.resume(at: now));
+    _trackingPolicy.begin(now);
+    _checkpoint(force: true);
+    if (_gps == null) await _enableGps();
   }
 
   Future<void> _finish() async {
     if (meter.status != MeterStatus.running &&
         meter.status != MeterStatus.paused) return;
     final finished = meter.finish();
+    unawaited(_stopGps());
     final record = TripRecord.fromReceipt(
       finished, pickup: _tripPickup, dropoff: _tripDropoff);
     setState(() => _pendingUnsaved = record);
@@ -315,14 +458,19 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       builder: (context) => QuoteDialog(tariff: meter.tariff),
     );
     if (!mounted || quote == null || quote.amount <= 0) return;
+    if (!await _requestLocationReady()) return;
+    if (!mounted || !_appVisible || meter.status != MeterStatus.idle) return;
+    final now = DateTime.now();
     _tripPickup = quote.pickup;
     _tripDropoff = quote.dropoff;
-    setState(() => meter.start(fixedFare: quote.amount));
+    setState(() => meter.start(at: now, fixedFare: quote.amount));
+    _trackingPolicy.begin(now);
     if (!await _saveNewTrip()) {
       if (mounted) setState(meter.reset);
+      _trackingPolicy.clear();
       return;
     }
-    if (mounted) _enableGps();
+    if (mounted) await _enableGps();
   }
 
   Future<void> _customTollDialog() async {
@@ -440,11 +588,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             padding: const EdgeInsets.only(bottom: 8),
             child: SizedBox(width: double.infinity,
               child: FilledButton.icon(
-                onPressed: () {
-                  setState(() => meter.resume());
-                  _checkpoint(force: true);
-                  _enableGps();
-                },
+                onPressed: _resumeTrip,
                 icon: const Icon(Icons.play_circle),
                 label: const Text('TIẾP TỤC CHUYẾN ĐÃ TẠM NGẮT'),
               ),
@@ -616,6 +760,14 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       ),
       body: SafeArea(
         child: ListView(padding: const EdgeInsets.all(12), children: [
+          if (meter.status == MeterStatus.running &&
+              !_trackingPolicy.hasTrustedFix)
+            const Card(child: ListTile(
+              leading: Icon(Icons.gps_not_fixed, color: Colors.orangeAccent),
+              title: Text('Đang xác định vị trí GPS'),
+              subtitle: Text('Chưa cộng km và phí chờ khi chưa có tín hiệu '
+                  'GPS chính xác; dịch vụ sẽ tạm ngắt nếu quá lâu.'),
+            )),
           if (meter.requiresManualResume)
             const Card(child: ListTile(
               leading: Icon(Icons.pause_circle, color: Colors.orangeAccent),
@@ -726,14 +878,13 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             Row(children: [
               Expanded(child: FilledButton.icon(
                 onPressed: () {
-                final resuming = status == MeterStatus.paused;
-                setState(() {
-                  if (!resuming) { meter.pause(); }
-                  else { meter.resume(); }
-                });
-                _checkpoint(force: true);
-                if (resuming) _enableGps();
-              },
+                  if (status == MeterStatus.paused) {
+                    _resumeTrip();
+                  } else {
+                    setState(() => meter.pause());
+                    _checkpoint(force: true);
+                  }
+                },
                 icon: Icon(status == MeterStatus.running ?
                     Icons.pause : Icons.play_arrow),
                 label: Text(status == MeterStatus.running ?

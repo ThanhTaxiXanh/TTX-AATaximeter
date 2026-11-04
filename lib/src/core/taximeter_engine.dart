@@ -324,34 +324,54 @@ class TaximeterEngine {
     return restored;
   }
 
-  void acceptGps(GpsFix fix) {
+  /// Returns true only for valid telemetry actually accepted by the meter.
+  /// A rejected outlier must not refresh the UI's GPS freshness watchdog.
+  bool acceptGps(GpsFix fix) {
     if (!fix.latitude.isFinite || !fix.longitude.isFinite ||
         fix.latitude.abs() > 90 || fix.longitude.abs() > 180 ||
         !fix.accuracyMeters.isFinite || fix.accuracyMeters < 0 ||
         fix.accuracyMeters > _tariff.gpsMaxAccuracyMeters ||
-        !fix.speedKmh.isFinite) return;
+        !fix.speedKmh.isFinite || fix.speedKmh < 0) return false;
 
-    speedKmh = math.max(0, fix.speedKmh);
-    maxSpeedKmh = math.max(maxSpeedKmh, speedKmh);
-    if (status != MeterStatus.running) return;
+    if (status != MeterStatus.running) {
+      speedKmh = fix.speedKmh;
+      maxSpeedKmh = math.max(maxSpeedKmh, speedKmh);
+      return true;
+    }
     final before = _lastFix;
     if (before == null) {
       _lastFix = fix;
-      return;
+      speedKmh = fix.speedKmh;
+      maxSpeedKmh = math.max(maxSpeedKmh, speedKmh);
+      return true;
     }
-    if (!fix.timestamp.isAfter(before.timestamp)) return;
-    final seconds = fix.timestamp.difference(before.timestamp).inMilliseconds / 1000;
+    if (!fix.timestamp.isAfter(before.timestamp)) return false;
+    final seconds =
+        fix.timestamp.difference(before.timestamp).inMilliseconds / 1000;
     final meters = _haversine(before, fix);
     final plausibleMax = math.max(25.0, seconds * 65.0);
     // Reject GPS jumps without replacing the last known-good fix.
-    if (meters > plausibleMax) return;
+    if (meters > plausibleMax) return false;
     _lastFix = fix;
+    speedKmh = fix.speedKmh;
+    maxSpeedKmh = math.max(maxSpeedKmh, speedKmh);
     final noiseFloor = math.max(
       3.0, math.max(before.accuracyMeters, fix.accuracyMeters) * 0.5,
     );
     if (meters > noiseFloor) {
       distanceMeters += meters * _tariff.gpsCalibrationMultiplier;
     }
+    return true;
+  }
+
+  /// Advance the internal monotonic meter tick reference without charging
+  /// waiting time or inventing distance during an untrusted GPS interval.
+  void skipUntrustedInterval(DateTime at) {
+    if (status != MeterStatus.running || _interrupted) return;
+    if (_lastTick == null || at.isBefore(_lastTick!)) return;
+    _lastTick = at;
+    _lastFix = null;
+    speedKmh = 0;
   }
 
   static double _haversine(GpsFix a, GpsFix b) {
