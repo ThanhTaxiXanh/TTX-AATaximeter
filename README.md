@@ -34,3 +34,9 @@ Không đính kèm APK gốc, tài sản âm thanh/ảnh QR của tác giả g�
 - VietQR theo tài khoản do người dùng tự nhập (mã BIN, tài khoản, chủ tài khoản). Nút `Tạo mã VietQR` mới tải ảnh từ img.vietqr.io và gửi thông tin thanh toán tới nhà cung cấp; **không xác nhận tiền đã nhận**.
 - Biểu giá/GPS mở rộng và lưu cấu hình, preset khác xe 4 chỗ thiếu một số ngưỡng nên gắn nhãn **chưa đủ thông số**.
 - **Giới hạn quan trọng:** chuyến đang chạy chưa khôi phục sau khi app bị kill; GPS chưa có foreground service; SQLite là bước cải tiến lưu chuyến kết thúc, không phải giải pháp an toàn kế toán tuyệt đối. Chưa triển khai Android Auto native.
+
+## Giai đoạn phục hồi chuyến và native Kotlin (đang kiểm thử)
+- `TripSessionSnapshot` chứa biểu giá nguyên gốc, tổng cước, trạng thái chuyến và lộ trình; mỗi 3 giây tạo checkpoint vào SQLite. Khi app bị đưa xuống nền hoặc khởi động lại, phiên tính cước được **tạm ngắt** và yêu cầu tài xế tiếp tục. Khoảng thời gian không có GPS tin cậy không tự tạo phí chờ/km.
+- Chuyến kết thúc và xóa snapshot được commit **cùng một SQLite transaction**, giảm rủi ro mất chuyến khi bị đóng bất ngờ.
+- Native bridge `MainActivity.kt` đồng bộ trạng thái hiển thị tới `CarStateStore`; `TtxCarAppService`, `TtxCarScreen` chuẩn bị Car App Library 1.7.0 và **chưa đăng ký service** vì đồng hồ cước độc lập không có danh mục Android Auto đã xác nhận. Xem `docs/ANDROID_AUTO_ARCHITECTURE.md`.
+- Chưa thể tính cước liên tục khi ứng dụng không được cấp foreground location service; bản này ưu tiên không thu phí sai hơn là giả lập đường đi trong thời gian mất tín hiệu.
