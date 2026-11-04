@@ -17,6 +17,7 @@ class TariffCodec {
     'gpsMaxAccuracyMeters': t.gpsMaxAccuracyMeters,
     'gpsCalibrationMultiplier': t.gpsCalibrationMultiplier,
     'roundToThousands': t.roundToThousands,
+    'fareTiers': t.fareTiers?.map((t) => t.toJson()).toList(),
   });
 
   static TariffConfig decode(String raw) {
@@ -49,6 +50,10 @@ class TariffCodec {
           data['roundToThousands'] is bool
               ? data['roundToThousands'] as bool
               : original.roundToThousands,
+      fareTiers: data['fareTiers'] is List
+          ? (data['fareTiers'] as List).map((v) =>
+              FareTier.fromJson(Map<String, dynamic>.from(v as Map))).toList()
+          : null,
     );
     config.validate();
     return config;

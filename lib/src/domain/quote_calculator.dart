@@ -22,7 +22,9 @@ class QuoteCalculator {
     }
     tariff.validate();
     final outgoing = tariff.baseFare +
-        math.max(0, distanceKm - tariff.baseDistanceKm) * perKmRate;
+        (perKmRate == tariff.perKmRate
+            ? tariff.distanceChargeForKm(distanceKm)
+            : math.max(0, distanceKm - tariff.baseDistanceKm) * perKmRate);
     // The return-leg discount needs comparison with original two-way behavior.
     final returnFare = twoWay
         ? distanceKm * perKmRate * (1 - returnLegDiscount)

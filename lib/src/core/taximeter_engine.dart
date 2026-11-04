@@ -4,6 +4,21 @@ import 'dart:math' as math;
 /// Example tariff values are NOT extracted/verified defaults from the APK.
 enum MeterStatus { idle, running, paused, finished }
 
+/// One cumulative pricing band, ending at [upToKm] measured from trip start.
+/// A null upper bound means the final unlimited distance band.
+class FareTier {
+  const FareTier({required this.upToKm, required this.ratePerKm});
+  final double? upToKm;
+  final double ratePerKm;
+  Map<String, dynamic> toJson() => {
+    'upToKm': upToKm, 'ratePerKm': ratePerKm,
+  };
+  factory FareTier.fromJson(Map<String, dynamic> map) => FareTier(
+    upToKm: (map['upToKm'] as num?)?.toDouble(),
+    ratePerKm: (map['ratePerKm'] as num).toDouble(),
+  );
+}
+
 class TariffConfig {
   const TariffConfig({
     required this.baseFare,
@@ -18,6 +33,7 @@ class TariffConfig {
     this.gpsCalibrationMultiplier = 1,
     this.roundToThousands = true,
     this.name = 'Tùy chỉnh',
+    this.fareTiers,
   });
 
   // Observed in the supplied 2026-11-04 reference videos.
@@ -47,6 +63,8 @@ class TariffConfig {
   final double gpsMaxAccuracyMeters;
   final double gpsCalibrationMultiplier;
   final bool roundToThousands;
+  final List<FareTier>? fareTiers;
+  bool get hasTieredFare => fareTiers != null;
 
   void validate() {
     final values = [
@@ -61,7 +79,59 @@ class TariffConfig {
         gpsMaxAccuracyMeters == 0 || gpsCalibrationMultiplier == 0) {
       throw ArgumentError('Sai ngưỡng khoảng cách hoặc độ chính xác GPS');
     }
+    final bands = fareTiers;
+    if (bands != null) {
+      if (bands.isEmpty || bands.length > 12) {
+        throw ArgumentError('Cần từ 1 đến 12 bậc giá');
+      }
+      var previous = baseDistanceKm;
+      for (var i = 0; i < bands.length; i++) {
+        final band = bands[i];
+        if (!band.ratePerKm.isFinite || band.ratePerKm < 0) {
+          throw ArgumentError('Đơn giá từng bậc không hợp lệ');
+        }
+        final end = band.upToKm;
+        if (i == bands.length - 1) {
+          if (end != null) throw ArgumentError('Bậc cuối phải không giới hạn');
+        } else {
+          if (end == null || !end.isFinite || end <= previous) {
+            throw ArgumentError('Các ngưỡng km phải tăng dần');
+          }
+          previous = end;
+        }
+      }
+    }
   }
+
+  /// Cumulative progressive charge: the next tier applies only to km inside
+  /// that tier, not retroactively to the entire trip.
+  double distanceChargeForKm(double km) {
+    if (!km.isFinite || km < 0) throw ArgumentError('Số km không hợp lệ');
+    final distance = math.max(0.0, km - baseDistanceKm);
+    if (fareTiers == null) {
+      final standard = math.max(0.0,
+          longDistanceThresholdKm - baseDistanceKm);
+      return math.min(distance, standard) * perKmRate +
+          math.max(0.0, distance - standard) * longDistancePerKmRate;
+    }
+    var previousKm = baseDistanceKm;
+    var price = 0.0;
+    for (final band in fareTiers!) {
+      final boundary = band.upToKm ?? km;
+      final inBand = math.max(0.0, math.min(km, boundary) - previousKm);
+      price += inBand * band.ratePerKm;
+      if (band.upToKm == null || km <= boundary) break;
+      previousKm = boundary;
+    }
+    return price;
+  }
+
+  List<FareTier> get effectiveFareTiers => fareTiers ??
+      <FareTier>[
+        FareTier(upToKm: longDistanceThresholdKm, ratePerKm: perKmRate),
+        FareTier(upToKm: null, ratePerKm: longDistancePerKmRate),
+      ];
+
 
   TariffConfig copyWith({
     double? baseFare, double? baseDistanceKm, double? perKmRate,
@@ -69,6 +139,7 @@ class TariffConfig {
     double? waitingFeePerHour, double? waitingSpeedThresholdKmh,
     double? speedLimitKmh, double? gpsMaxAccuracyMeters,
     double? gpsCalibrationMultiplier, bool? roundToThousands, String? name,
+    List<FareTier>? fareTiers,
   }) => TariffConfig(
         baseFare: baseFare ?? this.baseFare,
         baseDistanceKm: baseDistanceKm ?? this.baseDistanceKm,
@@ -86,6 +157,7 @@ class TariffConfig {
             gpsCalibrationMultiplier ?? this.gpsCalibrationMultiplier,
         roundToThousands: roundToThousands ?? this.roundToThousands,
         name: name ?? this.name,
+        fareTiers: fareTiers ?? this.fareTiers,
       );
 }
 
@@ -391,12 +463,7 @@ class TaximeterEngine {
 
   double get distanceFare {
     if (status == MeterStatus.idle || flatFare != null) return 0;
-    final covered = math.max(0.0, distanceKm - _tariff.baseDistanceKm);
-    final standardDistance = math.max(0.0,
-        _tariff.longDistanceThresholdKm - _tariff.baseDistanceKm);
-    return math.min(covered, standardDistance) * _tariff.perKmRate +
-        math.max(0.0, covered - standardDistance) *
-            _tariff.longDistancePerKmRate;
+    return _tariff.distanceChargeForKm(distanceKm);
   }
 
   double get waitingFare => status == MeterStatus.idle || flatFare != null
