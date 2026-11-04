@@ -168,6 +168,8 @@ class TaximeterEngine {
   double surcharge = 0;
   double discount = 0;
   double? flatFare;
+  bool _interrupted = false;
+  bool get requiresManualResume => _interrupted;
 
   double get distanceKm => distanceMeters / 1000;
   bool get isOverSpeedLimit => speedKmh > _tariff.speedLimitKmh;
@@ -191,11 +193,17 @@ class TaximeterEngine {
     _lastTick = startedAt;
     _lastFix = null;
     flatFare = fixedFare;
+    _interrupted = false;
     status = MeterStatus.running;
   }
 
   void tick(DateTime now) {
     if (status != MeterStatus.running && status != MeterStatus.paused) return;
+    if (_interrupted) {
+      // Never bill wall-clock time without reliable location/service evidence.
+      _lastTick = now;
+      return;
+    }
     final previous = _lastTick;
     if (previous == null || now.isBefore(previous)) return;
     final wholeSeconds = now.difference(previous).inSeconds;
@@ -216,9 +224,104 @@ class TaximeterEngine {
 
   void resume({DateTime? at}) {
     if (status != MeterStatus.paused) return;
-    tick(at ?? DateTime.now());
+    final now = at ?? DateTime.now();
+    if (!_interrupted) tick(now);
+    _interrupted = false;
+    _lastTick = now;
     status = MeterStatus.running;
-    _lastFix = null; // Prevent adding a jump during the pause.
+    _lastFix = null; // New baseline: do not invent distance during the gap.
+    speedKmh = 0;
+  }
+
+  /// Pause and stop all metering when the app loses a trustworthy clock/GPS
+  /// lifecycle (e.g., background without a foreground location service).
+  /// This differs from the driver's manual pause which still counts waiting.
+  void suspendForInterruption({DateTime? at}) {
+    if (status != MeterStatus.running && status != MeterStatus.paused) return;
+    final now = at ?? DateTime.now();
+    if (!_interrupted) tick(now);
+    _interrupted = true;
+    status = MeterStatus.paused;
+    speedKmh = 0;
+    _lastFix = null;
+    _lastTick = now;
+  }
+
+  /// Serializable snapshot for crash recovery. Tariff and trip metadata are
+  /// stored with it by TripSessionSnapshot.
+  Map<String, dynamic> exportSnapshot() {
+    if (status != MeterStatus.running && status != MeterStatus.paused) {
+      throw StateError('Only active trips can be checkpointed');
+    }
+    return {
+      'version': 1,
+      'status': status.name,
+      'startedAt': startedAt?.toIso8601String(),
+      'distanceMeters': distanceMeters,
+      'elapsedSeconds': elapsedSeconds,
+      'waitingSeconds': waitingSeconds,
+      'speedKmh': speedKmh,
+      'maxSpeedKmh': maxSpeedKmh,
+      'tollFee': tollFee,
+      'surcharge': surcharge,
+      'discount': discount,
+      'flatFare': flatFare,
+      'interrupted': _interrupted,
+    };
+  }
+
+  /// Restore as suspended/paused: never charge the app-off interval.
+  /// The driver must deliberately resume and reestablish a GPS baseline.
+  factory TaximeterEngine.fromSnapshot({
+    required TariffConfig tariff,
+    required Map<String, dynamic> snapshot,
+    DateTime? recoveredAt,
+  }) {
+    final version = snapshot['version'];
+    if (version != 1) throw const FormatException('Unknown trip snapshot version');
+    final original = snapshot['status']?.toString();
+    if (original != 'running' && original != 'paused') {
+      throw const FormatException('No in-progress trip in snapshot');
+    }
+    final startedAt = DateTime.tryParse(snapshot['startedAt']?.toString() ?? '');
+    if (startedAt == null) throw const FormatException('Missing trip start time');
+    double requiredNumber(String field) {
+      final n = snapshot[field];
+      if (n is! num || !n.toDouble().isFinite || n < 0) {
+        throw FormatException('Invalid snapshot field: $field');
+      }
+      return n.toDouble();
+    }
+
+    final distance = requiredNumber('distanceMeters');
+    final elapsed = requiredNumber('elapsedSeconds');
+    final waiting = requiredNumber('waitingSeconds');
+    if (waiting > elapsed) throw const FormatException('Waiting exceeds trip duration');
+    final maxSpeed = requiredNumber('maxSpeedKmh');
+    final toll = requiredNumber('tollFee');
+    final extra = requiredNumber('surcharge');
+    final discount = requiredNumber('discount');
+    final fixed = snapshot['flatFare'];
+    if (fixed != null && (fixed is! num || !fixed.toDouble().isFinite || fixed < 0)) {
+      throw const FormatException('Invalid fixed fare');
+    }
+
+    final restored = TaximeterEngine(tariff: tariff)
+      ..startedAt = startedAt
+      .._lastTick = recoveredAt ?? DateTime.now()
+      .._lastFix = null
+      .._interrupted = true
+      ..status = MeterStatus.paused
+      ..distanceMeters = distance
+      ..elapsedSeconds = elapsed.toInt()
+      ..waitingSeconds = waiting.toInt()
+      ..speedKmh = 0
+      ..maxSpeedKmh = maxSpeed
+      ..tollFee = toll
+      ..surcharge = extra
+      ..discount = discount
+      ..flatFare = fixed == null ? null : (fixed as num).toDouble();
+    return restored;
   }
 
   void acceptGps(GpsFix fix) {
@@ -336,5 +439,6 @@ class TaximeterEngine {
     surcharge = 0;
     discount = 0;
     flatFare = null;
+    _interrupted = false;
   }
 }

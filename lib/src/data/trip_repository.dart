@@ -13,7 +13,7 @@ class TripRepository {
     if (_database != null) return _database!;
     final root = await getDatabasesPath();
     _database = await openDatabase(
-      path.join(root, 'ttx_aataximeter_v1.db'), version: 1,
+      path.join(root, 'ttx_aataximeter_v1.db'), version: 2,
       onCreate: (db, version) async {
         await db.execute('''CREATE TABLE trips (
           id TEXT PRIMARY KEY,
@@ -24,9 +24,54 @@ class TripRepository {
         )''');
         await db.execute(
           'CREATE INDEX trips_started_at_idx ON trips(started_at DESC)');
+        await _createSessionTable(db);
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) await _createSessionTable(db);
       },
     );
     return _database!;
+  }
+
+  static Future<void> _createSessionTable(DatabaseExecutor db) async {
+    await db.execute('''CREATE TABLE IF NOT EXISTS active_trip (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      payload TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )''');
+  }
+
+  /// Atomic checkpoint of the active trip. Called serially by the UI.
+  Future<void> saveActive(String payload) async {
+    final db = await _db;
+    await db.insert('active_trip', {
+      'id': 1,
+      'payload': payload,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<String?> loadActive() async {
+    final db = await _db;
+    final rows = await db.query('active_trip',
+      columns: ['payload'], where: 'id = ?', whereArgs: [1], limit: 1);
+    return rows.isEmpty ? null : rows.first['payload'] as String;
+  }
+
+  Future<void> clearActive() async {
+    final db = await _db;
+    await db.delete('active_trip', where: 'id = ?', whereArgs: [1]);
+  }
+
+  /// A completed trip and deletion of its checkpoint commit together.
+  /// On crash either the checkpoint or final receipt remains recoverable.
+  Future<void> completeActive(TripRecord record) async {
+    final db = await _db;
+    await db.transaction((txn) async {
+      await txn.insert('trips', _row(record),
+        conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.delete('active_trip', where: 'id = ?', whereArgs: [1]);
+    });
   }
 
   static Map<String, Object?> _row(TripRecord t) => {
