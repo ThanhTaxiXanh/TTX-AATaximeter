@@ -53,3 +53,14 @@ Không đính kèm APK gốc, tài sản âm thanh/ảnh QR của tác giả g�
 Lần mở đầu sẽ hiện hộp thoại chọn Xe 4 Chỗ / Xe 7 Chỗ / Xe 16 Chỗ và nhập biển số. Dữ liệu lưu cục bộ bằng `SharedPreferencesAsync`; không sao chép biển số từ video. Nút hình ô tô trên thanh trên cho phép chỉnh lại. Chưa tự suy ra hoặc tự chuyển biểu giá theo loại xe vì các preset khác mẫu bốn chỗ chưa được xác minh đầy đủ.
 
 Chi tiết GPS nền và bài thử nghiệm trên thiết bị: [DEVICE_TEST_PLAN.md](docs/DEVICE_TEST_PLAN.md).
+
+
+## Dashboard có bản đồ và nhiều biểu giá (0.4.0, đang thử nghiệm)
+- Dashboard điện thoại chứa bản đồ tương tác bằng Flutter Map + OpenStreetMap: zoom, xoay bằng cử chỉ, marker GPS, nút về vị trí, đặt hướng Bắc, attribution hiện trực tiếp. Khi chưa cấp quyền thì chỉ hiện bản đồ toàn Việt Nam, KHÔNG suy đoán địa chỉ hiện tại.
+- Các biểu giá cước do tài xế tạo/lưu/chọn trên máy, có nhiều bậc km. Công thức **lũy tiến**: giá mở cửa bao gồm quãng đường mở cửa; bậc tiếp theo chỉ tính cho đoạn km của chính bậc đó. 1–12 bậc, bậc cuối không giới hạn.
+- Nút **TAXI HƯƠNG GIANG • CHỌN NHANH**: nếu đã cấu hình → chuyển bảng giá ngay; nếu chưa có → mở trình chỉnh sửa, tài xế phải điền số thực và xác nhận. KHÔNG có bất cứ mức giá Taxi Hương Giang nào do AI tự suy diễn.
+- Chỉ đổi biểu giá khi đồng hồ **CHỜ KHÁCH** (idle); chuyến đang chạy và chuyến hoàn tất chưa reset giữ nguyên biểu giá của chúng. Catalog lưu trong SharedPreferences, bản ghi SQLite khôi phục vẫn đóng băng giá tại thời điểm bắt đầu.
+- Trình cài đặt cũ (2 mức km) đã thay bằng trình chỉnh 1–12 bậc. Biểu giá đã lưu đời trước được chuyển thành các bậc hiệu lực tương đương khi người dùng chỉnh sửa.
+- **Giới hạn bản đồ:** đây là bản đồ OSM raster 2D trên điện thoại, KHÔNG phải điều hướng/dẫn đường, 3D tòa nhà, dữ liệu biển tốc độ, Android Auto hay bản đồ đã được kiểm tra pixel-perfect theo hai video mới. Tên đường vẫn cần reverse geocoding riêng.
+- **Tuân thủ OSM:** tile.openstreetmap.org là hạ tầng cộng đồng, chỉ thích hợp để phát triển/thử nghiệm ở mức sử dụng nhỏ với ghi công, nhận dạng ứng dụng, không prefetch/offline/bulk download. Để dùng lâu dài trong ứng dụng taxi, cần nhà cung cấp tiles được phép sử dụng thương mại, cache tuân thủ TTL tối thiểu và đánh giá chính sách: https://operations.osmfoundation.org/policies/tiles/
+- Bố cục hiện dựa trên yêu cầu và các video tham chiếu cũ. Hai video vừa tải lên cần đối chiếu trực quan từng khung hình trước khi xác nhận "clone 1:1"; **chưa xác nhận đạt pixel-perfect**.

@@ -80,6 +80,11 @@ class _TariffSettingsDialogState extends State<TariffSettingsDialog> {
           ratePerKm: parse(tiers[i].rate.text),
         ));
       }
+      if (val('base') <= 0 ||
+          rows.any((tier) => tier.ratePerKm <= 0)) {
+        throw const FormatException(
+          'Cước mở cửa và tất cả đơn giá mỗi bậc phải lớn hơn 0');
+      }
       final config = TariffConfig(
         name: name.text.trim(),
         baseFare: val('base'),

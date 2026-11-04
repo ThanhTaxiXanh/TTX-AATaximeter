@@ -15,7 +15,9 @@ class TariffProfile {
   final TariffConfig? tariff;
   final bool verifiedByDriver;
 
-  bool get configured => tariff != null && verifiedByDriver;
+  bool get configured => tariff != null && verifiedByDriver &&
+      tariff!.baseFare > 0 &&
+      tariff!.effectiveFareTiers.every((tier) => tier.ratePerKm > 0);
 
   Map<String, dynamic> toJson() => {
     'id': id,

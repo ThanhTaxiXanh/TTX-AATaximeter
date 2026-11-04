@@ -18,6 +18,10 @@ class _TariffCatalogPageState extends State<TariffCatalogPage> {
     final source = profile.tariff ??
         TariffConfig.demo().copyWith(
           name: profile.label,
+          baseFare: 0,
+          perKmRate: 0,
+          longDistancePerKmRate: 0,
+          waitingFeePerHour: 0,
           fareTiers: const [
             FareTier(upToKm: null, ratePerKm: 0),
           ],
