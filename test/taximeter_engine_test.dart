@@ -33,12 +33,12 @@ void main() {
     m.resume(at: start.add(const Duration(seconds: 45)));
   });
 
-  test('flat fare stays fixed even if extra charges added', () {
+  test('flat fare excludes distance/wait but includes extra charges', () {
     final m = TaximeterEngine(tariff: tariff);
     m.start(at: DateTime(2026), fixedFare: 250000);
     m.addToll(30000);
     m.setAdjustments(surchargeFee: 5000);
-    expect(m.totalFare, 250000);
+    expect(m.totalFare, 285000);
   });
 
   test('rejects outlier GPS and honors normal travel', () {
