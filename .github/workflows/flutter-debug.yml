@@ -18,6 +18,8 @@ jobs:
           cache: true
       - name: Generate Android project
         run: flutter create . --platforms=android --project-name ttx_aataximeter --org vn.thanhtaxixanh
+      - name: Remove auto-generated demo widget test
+        run: rm -f test/widget_test.dart
       - name: Inject GPS permissions
         run: python3 tool/bootstrap_android.py
       - name: Resolve dependencies
