@@ -1,6 +1,7 @@
 import 'dart:convert';
 import '../core/taximeter_engine.dart';
 import '../data/tariff_codec.dart';
+import 'trip_route_point.dart';
 
 enum PaymentMethod {
   cash, bankTransfer, card;
@@ -22,6 +23,7 @@ class TripRecord {
     this.vehicleType = '', this.vehiclePlate = '',
     this.fareProfileName = '', this.tariffSnapshot,
     this.paymentMethod = PaymentMethod.cash,
+    this.routePoints = const [],
   });
   final String id;
   final TripReceipt receipt;
@@ -29,23 +31,27 @@ class TripRecord {
   final String vehicleType, vehiclePlate, fareProfileName;
   final TariffConfig? tariffSnapshot;
   final PaymentMethod paymentMethod;
+  final List<TripRoutePoint> routePoints;
 
   TripRecord copyWith({PaymentMethod? paymentMethod}) => TripRecord(
     id: id, receipt: receipt, pickup: pickup, dropoff: dropoff,
     vehicleType: vehicleType, vehiclePlate: vehiclePlate,
     fareProfileName: fareProfileName, tariffSnapshot: tariffSnapshot,
     paymentMethod: paymentMethod ?? this.paymentMethod,
+    routePoints: routePoints,
   );
 
   factory TripRecord.fromReceipt(TripReceipt receipt,
       {String pickup = '', String dropoff = '',
        String vehicleType = '', String vehiclePlate = '',
-       String fareProfileName = '', TariffConfig? tariffSnapshot}) => TripRecord(
+       String fareProfileName = '', TariffConfig? tariffSnapshot,
+       List<TripRoutePoint> routePoints = const []}) => TripRecord(
     id: receipt.startedAt.microsecondsSinceEpoch.toString() +
         '-' + receipt.endedAt.microsecondsSinceEpoch.toString(),
     receipt: receipt, pickup: pickup, dropoff: dropoff,
     vehicleType: vehicleType, vehiclePlate: vehiclePlate,
     fareProfileName: fareProfileName, tariffSnapshot: tariffSnapshot,
+    routePoints: List<TripRoutePoint>.unmodifiable(routePoints),
   );
 
   Map<String, dynamic> toJson() => {
@@ -56,6 +62,7 @@ class TripRecord {
     'tariff': tariffSnapshot == null
         ? null : jsonDecode(TariffCodec.encode(tariffSnapshot!)),
     'paymentMethod': paymentMethod.name,
+    'routePoints': routePoints.map((p) => p.toJson()).toList(),
   };
   String encode() => jsonEncode(toJson());
   factory TripRecord.decode(String source) =>
@@ -106,6 +113,11 @@ class TripRecord {
           ? TariffCodec.decode(jsonEncode(json['tariff'])) : null,
       paymentMethod: PaymentMethod.fromCode(
         json['paymentMethod']?.toString()),
+      routePoints: json['routePoints'] is List
+          ? (json['routePoints'] as List).map((p) =>
+              TripRoutePoint.fromJson(Map<String, dynamic>.from(p as Map)))
+              .toList(growable: false)
+          : const [],
     );
   }
 }

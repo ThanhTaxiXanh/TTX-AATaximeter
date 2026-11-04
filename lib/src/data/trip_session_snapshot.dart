@@ -1,6 +1,7 @@
 import 'dart:convert';
 import '../core/taximeter_engine.dart';
 import 'tariff_codec.dart';
+import '../domain/trip_route_point.dart';
 
 /// Versioned, standalone crash-recovery record. It includes the original
 /// tariff and route so changing settings does not recalculate a live trip.
@@ -12,6 +13,7 @@ class TripSessionSnapshot {
     required this.dropoff,
     this.vehicleType = '', this.vehiclePlate = '',
     this.fareProfileName = '',
+    this.routePoints = const [],
   });
 
   final Map<String, dynamic> meter;
@@ -19,6 +21,7 @@ class TripSessionSnapshot {
   final String pickup;
   final String dropoff;
   final String vehicleType, vehiclePlate, fareProfileName;
+  final List<TripRoutePoint> routePoints;
 
   factory TripSessionSnapshot.fromEngine(
     TaximeterEngine engine, {
@@ -26,6 +29,7 @@ class TripSessionSnapshot {
     String dropoff = '',
     String vehicleType = '', String vehiclePlate = '',
     String fareProfileName = '',
+    List<TripRoutePoint> routePoints = const [],
   }) => TripSessionSnapshot(
     meter: engine.exportSnapshot(),
     tariff: engine.tariff,
@@ -33,6 +37,7 @@ class TripSessionSnapshot {
     dropoff: dropoff,
     vehicleType: vehicleType, vehiclePlate: vehiclePlate,
     fareProfileName: fareProfileName,
+    routePoints: List<TripRoutePoint>.unmodifiable(routePoints),
   );
 
   String encode() => jsonEncode({
@@ -43,6 +48,7 @@ class TripSessionSnapshot {
     'dropoff': dropoff,
     'vehicleType': vehicleType, 'vehiclePlate': vehiclePlate,
     'fareProfileName': fareProfileName,
+    'routePoints': routePoints.map((p) => p.toJson()).toList(),
   });
 
   factory TripSessionSnapshot.decode(String json) {
@@ -60,6 +66,11 @@ class TripSessionSnapshot {
       vehicleType: root['vehicleType']?.toString() ?? '',
       vehiclePlate: root['vehiclePlate']?.toString() ?? '',
       fareProfileName: root['fareProfileName']?.toString() ?? '',
+      routePoints: root['routePoints'] is List
+          ? (root['routePoints'] as List).map((p) =>
+              TripRoutePoint.fromJson(Map<String, dynamic>.from(p as Map)))
+              .toList(growable: false)
+          : const [],
     );
   }
 

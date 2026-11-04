@@ -14,6 +14,7 @@ import 'src/ui/fare_breakdown_section.dart';
 import 'src/ui/quote_dialog.dart';
 import 'src/data/trip_repository.dart';
 import 'src/domain/trip_record.dart';
+import 'src/domain/trip_route_point.dart';
 import 'src/payment/vietqr.dart';
 import 'src/ui/bank_accounts_dialog.dart';
 import 'src/ui/vietqr_payment_panel.dart';
@@ -83,6 +84,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   TariffCatalog _tariffCatalog = TariffCatalog.initial();
   double? _mapLat;
   double? _mapLon;
+  final List<TripRoutePoint> _routePoints = [];
+  int _routeSegment = 0;
   bool _storageReady = false;
   bool _savingNewTrip = false;
   DateTime _lastCheckpoint = DateTime.fromMillisecondsSinceEpoch(0);
@@ -179,6 +182,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         _tripVehicleType = restored.vehicleType;
         _tripVehiclePlate = restored.vehiclePlate;
         _tripFareProfileName = restored.fareProfileName;
+        _routePoints.addAll(restored.routePoints);
+        _routeSegment = _routePoints.isEmpty ? 0 :
+            _routePoints.last.segment + 1;
         _destinationController.text = restored.dropoff;
         _gpsStatus = 'Chuyến cũ đã được tạm ngắt an toàn';
       }
@@ -422,7 +428,17 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         meter.status == MeterStatus.paused;
     if (!active) return;
     if (!meter.requiresManualResume && _trackingPolicy.shouldSuspend(now)) {
-      _suspendForGps('GPS mất tín hiệu: đã tạm ngắt tính cước');
+      // Keep the foreground location subscription alive. Canceling it here
+      // makes a brief Android screen-off GPS gap permanently stop the ride.
+      if (_gps == null) {
+        _suspendForGps('Dịch vụ GPS đã dừng: tạm ngắt tính cước');
+        return;
+      }
+      setState(() {
+        meter.skipUntrustedInterval(now);
+        _gpsStatus = 'GPS gián đoạn: đang chờ tín hiệu, không cộng cước';
+      });
+      _checkpoint();
       return;
     }
     setState(() {
@@ -481,8 +497,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         // Check the old watchdog state BEFORE refreshing it with this fix.
         // Otherwise a resumed stream could hide a long background GPS gap.
         if (_trackingPolicy.shouldSuspend(now)) {
-          _suspendForGps('GPS gián đoạn quá ngưỡng: tạm ngắt tính cước');
-          return;
+          // A late but fresh, valid fix may resume tracking with a new
+          // baseline. Never bridge a GPS blackout or bill its elapsed time.
+          meter.skipUntrustedInterval(now);
+          _routeSegment++;
         }
         final age = now.difference(position.timestamp);
         // A cached or future fix must not refresh the GPS watchdog.
@@ -507,6 +525,19 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           return;
         }
         _trackingPolicy.acceptedFix(now);
+        if (meter.status == MeterStatus.running) {
+          final last = _routePoints.isEmpty ? null : _routePoints.last;
+          if (last == null || last.segment != _routeSegment ||
+              now.difference(last.recordedAt) >= const Duration(seconds: 5) ||
+              (last.latitude - position.latitude).abs() > 0.00004 ||
+              (last.longitude - position.longitude).abs() > 0.00004) {
+            _routePoints.add(TripRoutePoint(
+              latitude: position.latitude, longitude: position.longitude,
+              recordedAt: position.timestamp, accuracyMeters: position.accuracy,
+              speedKmh: position.speed * 3.6, segment: _routeSegment,
+            ));
+          }
+        }
         setState(() {
           _mapLat = position.latitude;
           _mapLon = position.longitude;
@@ -546,12 +577,12 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         state != AppLifecycleState.paused) return;
     if (meter.status != MeterStatus.running &&
         meter.status != MeterStatus.paused) return;
-    final safe = _trackingPolicy.canLeaveForeground(DateTime.now(),
-        streamSubscribed: _gps != null);
-    if (!safe) {
-      _suspendForGps('GPS chưa sẵn sàng khi ra nền: chuyến đã tạm ngắt');
+    // Geolocator already runs a location-type Android foreground service.
+    // Do not cancel it just because we leave while acquiring a GPS fix.
+    // The watchdog suppresses untrusted billing; a valid fix may recover.
+    if (_gps == null) {
+      _suspendForGps('Dịch vụ GPS không hoạt động khi ra nền');
     }
-    // Healthy FGS continues only while the Android process stays alive.
   }
 
   String _sessionPayload() => TripSessionSnapshot.fromEngine(
@@ -559,6 +590,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     vehicleType: _tripVehicleType,
     vehiclePlate: _tripVehiclePlate,
     fareProfileName: _tripFareProfileName,
+    routePoints: _routePoints,
   ).encode();
 
   /// Freeze vehicle and fare profile at trip start.
@@ -612,7 +644,11 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     _tripPickup = '';
     _tripDropoff = _destinationController.text.trim();
     _captureTripMetadata();
-    setState(() => meter.start(at: now));
+    setState(() {
+      _routePoints.clear();
+      _routeSegment = 0;
+      meter.start(at: now);
+    });
     _trackingPolicy.begin(now);
     if (!await _saveNewTrip()) {
       if (mounted) setState(meter.reset);
@@ -627,7 +663,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     if (!await _requestLocationReady()) return;
     if (!mounted || !_appVisible || meter.status != MeterStatus.paused) return;
     final now = DateTime.now();
-    setState(() => meter.resume(at: now));
+    setState(() {
+      _routeSegment++; // A pause must not create a fictitious map connection.
+      meter.resume(at: now);
+    });
     _trackingPolicy.begin(now);
     _checkpoint(force: true);
     if (_gps == null) await _enableGps();
@@ -644,7 +683,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       vehicleType: _tripVehicleType,
       vehiclePlate: _tripVehiclePlate,
       fareProfileName: _tripFareProfileName,
-      tariffSnapshot: meter.tariff);
+      tariffSnapshot: meter.tariff,
+      routePoints: _routePoints);
     setState(() => _pendingUnsaved = record);
     await _saveCompletedRecord();
   }
@@ -705,7 +745,11 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     _tripDropoff = quote.dropoff;
     _destinationController.text = quote.dropoff;
     _captureTripMetadata();
-    setState(() => meter.start(at: now, fixedFare: quote.amount));
+    setState(() {
+      _routePoints.clear();
+      _routeSegment = 0;
+      meter.start(at: now, fixedFare: quote.amount);
+    });
     _trackingPolicy.begin(now);
     if (!await _saveNewTrip()) {
       if (mounted) setState(meter.reset);
@@ -1264,6 +1308,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         children: [
           DashboardMap(
             latitude: _mapLat, longitude: _mapLon,
+            routePoints: _routePoints,
             speedKmh: meter.speedKmh,
             speedLimitKmh: meter.tariff.speedLimitKmh,
             onLocate: _locateOnMap,
@@ -1349,6 +1394,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                   ? () {
                       setState(() {
                         meter.reset();
+                        _routePoints.clear();
+                        _routeSegment = 0;
                         _destinationController.clear();
                       });
                     }

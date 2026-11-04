@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import '../domain/trip_route_point.dart';
 
 /// Real, interactive OSM-based map in the phone dashboard.
 /// This is NOT a turn-by-turn navigator or a native Android Auto screen.
@@ -10,10 +11,12 @@ class DashboardMap extends StatefulWidget {
     super.key, required this.latitude, required this.longitude,
     required this.onLocate, required this.speedKmh,
     required this.speedLimitKmh,
+    this.routePoints = const [],
   });
   final double? latitude, longitude;
   final VoidCallback onLocate;
   final double speedKmh, speedLimitKmh;
+  final List<TripRoutePoint> routePoints;
   @override
   State<DashboardMap> createState() => _DashboardMapState();
 }
@@ -64,6 +67,19 @@ class _DashboardMapState extends State<DashboardMap> {
     super.dispose();
   }
 
+  List<Polyline> get routeLines {
+    final groups = <int, List<LatLng>>{};
+    for (final p in widget.routePoints) {
+      groups.putIfAbsent(p.segment, () => []).add(
+        LatLng(p.latitude, p.longitude));
+    }
+    return groups.values.where((points) => points.length > 1)
+        .map((points) => Polyline(
+          points: points, strokeWidth: 5,
+          color: const Color(0xFF07BFFF)))
+        .toList();
+  }
+
   @override
   Widget build(BuildContext context) => ClipRRect(
     borderRadius: BorderRadius.circular(17),
@@ -91,6 +107,8 @@ class _DashboardMapState extends State<DashboardMap> {
             userAgentPackageName: 'vn.thanhtaxixanh.ttx_aataximeter',
             maxNativeZoom: 19,
           ),
+          if (routeLines.isNotEmpty)
+            PolylineLayer(polylines: routeLines),
           if (hasFix)
             MarkerLayer(markers: [
               Marker(
