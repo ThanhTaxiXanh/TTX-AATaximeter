@@ -441,7 +441,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             child: SizedBox(width: double.infinity,
               child: FilledButton.icon(
                 onPressed: () {
-                  setState(meter.resume);
+                  setState(() => meter.resume());
                   _checkpoint(force: true);
                   _enableGps();
                 },
