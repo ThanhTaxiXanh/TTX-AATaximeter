@@ -20,15 +20,19 @@ class TariffConfig {
     this.name = 'Tùy chỉnh',
   });
 
-  // Demo ONLY. Drivers must configure their actual legal tariff.
+  // Observed in the supplied 2026-11-04 reference videos.
+  // This example preset is not a legally certified taxi tariff.
   factory TariffConfig.demo() => const TariffConfig(
-        name: 'Biểu giá ví dụ',
+        name: 'Taxi Đô Thị 4 Chỗ (mẫu tham khảo)',
         baseFare: 12000,
-        baseDistanceKm: 1,
-        perKmRate: 15000,
+        baseDistanceKm: 0.5,
+        perKmRate: 14500,
         longDistanceThresholdKm: 30,
         longDistancePerKmRate: 12000,
-        waitingFeePerHour: 40000,
+        waitingFeePerHour: 30000,
+        waitingSpeedThresholdKmh: 5,
+        speedLimitKmh: 80,
+        gpsMaxAccuracyMeters: 35,
       );
 
   final String name;

@@ -6,6 +6,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'src/core/taximeter_engine.dart';
+import 'src/ui/reference_speedometer.dart';
+import 'src/ui/quote_dialog.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -39,7 +41,7 @@ class TtxAATaximeterApp extends StatelessWidget {
             seedColor: const Color(0xFFF4BC28),
             brightness: Brightness.dark,
           ),
-          scaffoldBackgroundColor: const Color(0xFF101417),
+          scaffoldBackgroundColor: const Color(0xFF080C18),
           useMaterial3: true,
         ),
         home: const TaximeterHome(),
@@ -59,6 +61,7 @@ class _TaximeterHomeState extends State<TaximeterHome> {
   Timer? _ticker;
   StreamSubscription<Position>? _gps;
   bool _carPreview = false;
+  bool _carMirror = false;
   String _gpsStatus = 'Chưa kích hoạt GPS';
   List<Map<String, dynamic>> _history = [];
 
@@ -169,36 +172,168 @@ class _TaximeterHomeState extends State<TaximeterHome> {
   }
 
   Future<void> _flatFareDialog() async {
-    final controller = TextEditingController();
-    final result = await showDialog<double>(
+    if (meter.status != MeterStatus.idle) {
+      _notify('Kết thúc cuốc hiện tại trước khi tạo báo giá mới');
+      return;
+    }
+    final quote = await showDialog<QuoteResult>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Bắt đầu cuốc bao giá'),
-        content: TextField(
-          controller: controller,
+      builder: (context) => QuoteDialog(tariff: meter.tariff),
+    );
+    if (!mounted || quote == null || quote.amount <= 0) return;
+    setState(() => meter.start(fixedFare: quote.amount));
+    _enableGps();
+  }
+
+  Future<void> _customTollDialog() async {
+    final input = TextEditingController();
+    final amount = await showDialog<double>(context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Thêm phí BOT / cầu đường'),
+        content: TextField(controller: input,
           keyboardType: TextInputType.number,
           decoration: const InputDecoration(
-            labelText: 'Giá trọn gói (VND)',
-            hintText: 'Ví dụ: 250000',
-          ),
-        ),
+            labelText: 'Số tiền (đ)', hintText: 'Ví dụ: 35000')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context),
-              child: const Text('Hủy')),
-          FilledButton(
-            onPressed: () => Navigator.pop(
-              context, double.tryParse(controller.text),
-            ),
-            child: const Text('Bắt đầu'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Hủy')),
+          FilledButton(onPressed: () =>
+            Navigator.pop(dialogContext, double.tryParse(input.text)),
+            child: const Text('Cộng phí')),
         ],
       ),
     );
-    controller.dispose();
-    if (!mounted || result == null || result <= 0 ||
-        meter.status != MeterStatus.idle) return;
-    setState(() => meter.start(fixedFare: result));
-    _enableGps();
+    input.dispose();
+    if (!mounted || amount == null || amount < 0) return;
+    if (meter.status != MeterStatus.running &&
+        meter.status != MeterStatus.paused) {
+      _notify('Chỉ cộng phí khi đang có chuyến');
+      return;
+    }
+    setState(() => meter.addToll(amount));
+  }
+
+  Widget _buildCarMode() {
+    final active = meter.status == MeterStatus.running ||
+        meter.status == MeterStatus.paused;
+    final view = Padding(
+      padding: const EdgeInsets.all(14),
+      child: Column(children: [
+        Row(children: [
+          Container(padding: const EdgeInsets.symmetric(
+            horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFB800),
+              borderRadius: BorderRadius.circular(10)),
+            child: const Text('CAR MODE',
+              style: TextStyle(color: Colors.black,
+                fontWeight: FontWeight.w800))),
+          const SizedBox(width: 8),
+          Expanded(child: Text(meter.tariff.name,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white60))),
+          IconButton(onPressed: () =>
+              setState(() => _carMirror = !_carMirror),
+              tooltip: 'Lật HUD kính lái',
+              icon: const Icon(Icons.flip)),
+          IconButton(onPressed: () =>
+              setState(() { _carPreview = false; _carMirror = false; }),
+              tooltip: 'Thoát Car Mode',
+              icon: const Icon(Icons.close)),
+        ]),
+        const Spacer(),
+        Text(meter.speedKmh.round().toString(),
+          style: const TextStyle(
+            fontSize: 106, height: 1,
+            color: Color(0xFF00D8F0), fontWeight: FontWeight.w900)),
+        const Text('KM/H', style: TextStyle(
+          color: Colors.white60, fontSize: 19, letterSpacing: 2)),
+        const SizedBox(height: 20),
+        Container(padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFF111829),
+            border: Border.all(color: const Color(0xFFFFB800), width: 2),
+            borderRadius: BorderRadius.circular(22),
+          ),
+          child: Column(children: [
+            const Text('CƯỚC TAXI',
+              style: TextStyle(color: Colors.white60)),
+            FittedBox(child: Text(vnd(meter.totalFare),
+              style: const TextStyle(
+                color: Color(0xFFFFB800), fontSize: 50,
+                fontWeight: FontWeight.w900))),
+          ]),
+        ),
+        const SizedBox(height: 15),
+        Container(padding: const EdgeInsets.symmetric(
+            vertical: 14, horizontal: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            color: const Color(0xFF1B2437),
+          ),
+          child: Row(children: [
+            Expanded(child: Column(children: [
+              const Text('QUÃNG ĐƯỜNG',
+                style: TextStyle(fontSize: 10, color: Colors.white60)),
+              Text('${meter.distanceKm.toStringAsFixed(2)} km',
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+            ])),
+            Expanded(child: Column(children: [
+              const Text('THỜI GIAN',
+                style: TextStyle(fontSize: 10, color: Colors.white60)),
+              Text(clock(meter.elapsedSeconds),
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+            ])),
+            Expanded(child: Column(children: [
+              const Text('GIỜ CHỜ',
+                style: TextStyle(fontSize: 10, color: Colors.white60)),
+              Text(clock(meter.waitingSeconds),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold, color: Colors.orange)),
+            ])),
+          ]),
+        ),
+        const Spacer(),
+        Row(children: [
+          for (final amount in [10000, 20000, 50000])
+            Expanded(child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              child: OutlinedButton(
+                onPressed: active ? () =>
+                    setState(() => meter.addToll(amount)) : null,
+                child: Text('BOT +${amount ~/ 1000}k',
+                  style: const TextStyle(
+                    color: Color(0xFF00D8F0), fontSize: 12)),
+              ),
+            )),
+        ]),
+        const SizedBox(height: 7),
+        SizedBox(width: double.infinity, height: 64,
+          child: FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: active
+                  ? const Color(0xFFFF304C) : const Color(0xFF00DA75),
+              foregroundColor: Colors.black),
+            onPressed: active ? _finish : (meter.status == MeterStatus.idle
+                ? _start : () => setState(meter.reset)),
+            child: Text(active ? 'KẾT THÚC' :
+                (meter.status == MeterStatus.idle
+                    ? 'BẮT ĐẦU CHUYẾN' : 'CUỐC MỚI'),
+                style: const TextStyle(fontWeight: FontWeight.w900,
+                  fontSize: 20)),
+          ),
+        ),
+      ]),
+    );
+    return Scaffold(
+      body: SafeArea(child: _carMirror
+        ? Transform(
+            transform: Matrix4.rotationY(3.141592653589793),
+            alignment: Alignment.center,
+            child: view,
+          )
+        : view),
+    );
   }
 
   Future<void> _tariffDialog() async {
@@ -329,6 +464,7 @@ class _TaximeterHomeState extends State<TaximeterHome> {
       MeterStatus.paused => 'TẠM DỪNG / TÍNH CHỜ',
       MeterStatus.finished => 'HOÀN THÀNH',
     };
+    if (_carPreview) return _buildCarMode();
     return Scaffold(
       appBar: AppBar(
         title: const Text('TTX AATaximeter'),
@@ -341,17 +477,35 @@ class _TaximeterHomeState extends State<TaximeterHome> {
       ),
       body: SafeArea(
         child: ListView(padding: const EdgeInsets.all(12), children: [
-          Row(children: [
-            Expanded(child: Text(statusLabel, style: const TextStyle(
-                fontWeight: FontWeight.w800, color: Colors.amberAccent))),
-            Text(_gpsStatus, style: const TextStyle(fontSize: 12)),
-          ]),
-          const SizedBox(height: 10),
+          Card(child: ListTile(
+            leading: const Icon(Icons.gps_fixed, color: Color(0xFF00DA75)),
+            title: Text(_gpsStatus, style: const TextStyle(
+                fontSize: 12, color: Color(0xFF00DA75))),
+            trailing: Text(statusLabel, style: const TextStyle(fontSize: 11)),
+          )),
+          Card(child: ListTile(
+            dense: true,
+            leading: const Icon(Icons.view_marquee,
+                color: Color(0xFFFFB800)),
+            title: const Text('● LED   CHÚC QUÝ KHÁCH THƯỢNG LỘ BÌNH AN',
+              style: TextStyle(color: Color(0xFFFFB800), fontSize: 12)),
+          )),
+          const Card(child: ListTile(
+            dense: true,
+            leading: Icon(Icons.navigation, color: Color(0xFF00D8F0)),
+            title: Text('Tên đường: đang cập nhật vị trí...',
+              style: TextStyle(fontSize: 12)),
+          )),
+          ReferenceSpeedometer(
+            speedKmh: meter.speedKmh,
+            speedLimitKmh: meter.tariff.speedLimitKmh,
+          ),
+          const SizedBox(height: 8),
           Container(
             padding: EdgeInsets.symmetric(
                 vertical: _carPreview ? 45 : 25, horizontal: 14),
             decoration: BoxDecoration(
-              color: const Color(0xFF202A2C),
+              color: const Color(0xFF111829),
               borderRadius: BorderRadius.circular(18),
               border: Border.all(color: Colors.amber.shade700, width: 1),
             ),
@@ -362,7 +516,7 @@ class _TaximeterHomeState extends State<TaximeterHome> {
               FittedBox(child: Text(vnd(meter.totalFare),
                 style: TextStyle(
                   color: Colors.amberAccent,
-                  fontSize: _carPreview ? 58 : 46,
+                  fontSize: 46,
                   fontWeight: FontWeight.w900,
                 ),
               )),
@@ -402,11 +556,11 @@ class _TaximeterHomeState extends State<TaximeterHome> {
             Column(children: [
               SizedBox(width: double.infinity, child: FilledButton.icon(
                 onPressed: _start, icon: const Icon(Icons.play_arrow),
-                label: const Text('BẮT ĐẦU TÍNH CƯỚC'),
+                label: const Text('BẮT ĐẦU TÍNH CƯỚC CHUẨN'),
               )),
               SizedBox(width: double.infinity, child: OutlinedButton.icon(
                 onPressed: _flatFareDialog, icon: const Icon(Icons.price_check),
-                label: const Text('CUỐC BAO GIÁ TRỌN GÓI'),
+                label: const Text('TÍNH TRƯỚC / BAO GIÁ TRỌN GÓI (1 & 2 CHIỀU)'),
               )),
             ]),
           if (active) ...[
@@ -435,6 +589,12 @@ class _TaximeterHomeState extends State<TaximeterHome> {
                   setState(() => meter.addToll(10000))),
               ActionChip(label: const Text('+20.000đ BOT'), onPressed: () =>
                   setState(() => meter.addToll(20000))),
+              ActionChip(label: const Text('+35.000đ BOT'), onPressed: () =>
+                  setState(() => meter.addToll(35000))),
+              ActionChip(label: const Text('+50.000đ BOT'), onPressed: () =>
+                  setState(() => meter.addToll(50000))),
+              ActionChip(label: const Text('✎ Tùy chỉnh'),
+                  onPressed: _customTollDialog),
             ]),
           ],
           if (status == MeterStatus.finished)
@@ -444,8 +604,8 @@ class _TaximeterHomeState extends State<TaximeterHome> {
               label: const Text('CHUYẾN MỚI'),
             )),
           SwitchListTile(
-            title: const Text('Xem trước bố cục xe (trên điện thoại)'),
-            subtitle: const Text('Không phải Android Auto thực tế'),
+            title: const Text('Chế độ xe hơi • CAR MODE'),
+            subtitle: const Text('Bố cục toàn màn hình trên điện thoại; có HUD lật ngang'),
             value: _carPreview,
             onChanged: (value) => setState(() => _carPreview = value),
           ),

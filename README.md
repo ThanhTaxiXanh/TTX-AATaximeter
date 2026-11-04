@@ -24,3 +24,6 @@ Xem `docs/REVERSE_ENGINEERING_REPORT.md` về bằng chứng và lộ trình.
 Flutter/Dart làm domain/shared application logic. Android Auto phải bổ sung `CarAppService` + `Session` + `Screen` **bằng Kotlin** theo Android for Cars App Library, không thể render Flutter widget tự do lên host như điện thoại. Giữ chính sách tương thích và an toàn cho người lái.
 
 Không đính kèm APK gốc, tài sản âm thanh/ảnh QR của tác giả gốc hay dữ liệu cá nhân.
+
+## Bằng chứng video giao diện Taximeter Pro (04/11/2026)
+Đã xem hai video tham chiếu màn hình dọc 720×1600 và lập bảng thời gian, giá cước, hành vi và ma trận mức tương đồng ở [VIDEO_UI_REFERENCE.md](docs/VIDEO_UI_REFERENCE.md). Preset 4 chỗ trong mã lấy từ màn hình video (12.000đ mở cửa/0,5km, 14.500đ/km, 30.000đ/giờ chờ). Unit test `15km → 222.000đ` đối chiếu với video; **không** khẳng định chứng nhận pháp lý. Giao diện bổ sung vòng cung tốc độ, các nút BOT, báo giá có lộ trình, Car Mode/HUD trên điện thoại. Bản ghi không có hình ảnh Android Auto thật.
