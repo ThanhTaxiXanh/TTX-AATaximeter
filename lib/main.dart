@@ -435,6 +435,21 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           ]),
         ),
         const Spacer(),
+        if (meter.requiresManualResume)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: SizedBox(width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () {
+                  setState(meter.resume);
+                  _checkpoint(force: true);
+                  _enableGps();
+                },
+                icon: const Icon(Icons.play_circle),
+                label: const Text('TIẾP TỤC CHUYẾN ĐÃ TẠM NGẮT'),
+              ),
+            ),
+          ),
         Row(children: [
           for (final amount in [10000, 20000, 50000])
             Expanded(child: Padding(
