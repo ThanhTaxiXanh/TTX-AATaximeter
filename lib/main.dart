@@ -10,7 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'src/core/taximeter_engine.dart';
 import 'src/core/location_tracking_policy.dart';
-import 'src/ui/reference_speedometer.dart';
+import 'src/ui/fare_breakdown_section.dart';
 import 'src/ui/quote_dialog.dart';
 import 'src/data/trip_repository.dart';
 import 'src/domain/trip_record.dart';
@@ -92,6 +92,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   bool _vehicleDialogOpen = false;
   String _tripPickup = '';
   String _tripDropoff = '';
+  String _tripVehicleType = '';
+  String _tripVehiclePlate = '';
+  String _tripFareProfileName = '';
+  final TextEditingController _destinationController = TextEditingController();
   Timer? _ticker;
   StreamSubscription<Position>? _gps;
   final LocationTrackingPolicy _trackingPolicy = LocationTrackingPolicy();
@@ -159,6 +163,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         meter = restored.restore();
         _tripPickup = restored.pickup;
         _tripDropoff = restored.dropoff;
+        _tripVehicleType = restored.vehicleType;
+        _tripVehiclePlate = restored.vehiclePlate;
+        _tripFareProfileName = restored.fareProfileName;
+        _destinationController.text = restored.dropoff;
         _gpsStatus = 'Chuyến cũ đã được tạm ngắt an toàn';
       }
       if (!mounted) return;
@@ -188,6 +196,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     _ticker?.cancel();
     _gps?.cancel();
     repository.dispose();
+    _destinationController.dispose();
     super.dispose();
   }
 
@@ -397,7 +406,17 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
 
   String _sessionPayload() => TripSessionSnapshot.fromEngine(
     meter, pickup: _tripPickup, dropoff: _tripDropoff,
+    vehicleType: _tripVehicleType,
+    vehiclePlate: _tripVehiclePlate,
+    fareProfileName: _tripFareProfileName,
   ).encode();
+
+  /// Freeze vehicle and fare profile at trip start.
+  void _captureTripMetadata() {
+    _tripVehicleType = _vehicle?.category.label ?? '';
+    _tripVehiclePlate = _vehicle?.plate ?? '';
+    _tripFareProfileName = _tariffCatalog.active.label;
+  }
 
   /// Serialize writes so a slower old checkpoint cannot replace a new one.
   void _checkpoint({bool force = false}) {
@@ -441,7 +460,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     if (!mounted || !_appVisible || meter.status != MeterStatus.idle) return;
     final now = DateTime.now();
     _tripPickup = '';
-    _tripDropoff = '';
+    _tripDropoff = _destinationController.text.trim();
+    _captureTripMetadata();
     setState(() => meter.start(at: now));
     _trackingPolicy.begin(now);
     if (!await _saveNewTrip()) {
@@ -469,7 +489,12 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     final finished = meter.finish();
     unawaited(_stopGps());
     final record = TripRecord.fromReceipt(
-      finished, pickup: _tripPickup, dropoff: _tripDropoff);
+      finished,
+      pickup: _tripPickup, dropoff: _tripDropoff,
+      vehicleType: _tripVehicleType,
+      vehiclePlate: _tripVehiclePlate,
+      fareProfileName: _tripFareProfileName,
+      tariffSnapshot: meter.tariff);
     setState(() => _pendingUnsaved = record);
     await _saveCompletedRecord();
   }
@@ -498,6 +523,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           _tripPickup = '';
           _tripDropoff = '';
           _carPreview = false;
+          _destinationController.clear();
         });
         await CarStateBridge.publish(meter);
       }
@@ -526,6 +552,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     final now = DateTime.now();
     _tripPickup = quote.pickup;
     _tripDropoff = quote.dropoff;
+    _destinationController.text = quote.dropoff;
+    _captureTripMetadata();
     setState(() => meter.start(at: now, fixedFare: quote.amount));
     _trackingPolicy.begin(now);
     if (!await _saveNewTrip()) {
@@ -740,39 +768,62 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     if (chosen != null && mounted) await _applyCatalog(chosen);
   }
 
-  Future<void> _quickHuongGiang() async {
-    if (!_canChangeFare) {
-      _notify('Kết thúc chuyến hiện tại trước khi chọn Taxi Hương Giang.');
-      return;
-    }
-    final existing = _tariffCatalog.find('huong_giang');
-    if (existing?.configured == true) {
-      await _applyCatalog(_tariffCatalog.activate('huong_giang'));
-      return;
-    }
-    final edited = await showDialog<TariffConfig>(
+  Future<void> _showTariffSelector() async {
+    final chosen = await showModalBottomSheet<String>(
       context: context,
-      builder: (ctx) => TariffSettingsDialog(
-        companyLabel: 'Taxi Hương Giang',
-        // Placeholder values are zero by design; never invent the firm's fare.
-        current: TariffConfig.demo().copyWith(
-          name: 'Taxi Hương Giang',
-          baseFare: 0,
-          perKmRate: 0,
-          longDistancePerKmRate: 0,
-          waitingFeePerHour: 0,
-          fareTiers: const [
-            FareTier(upToKm: null, ratePerKm: 0),
-          ],
-        ),
-      ),
+      backgroundColor: const Color(0xFF151518),
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(sheetContext).height * .72),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+          child: Column(mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const Text('CHỌN BẢNG GIÁ CƯỚC',
+              style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 7),
+            const Text('Chọn tên cấu hình đã lưu cho chuyến mới.',
+              style: TextStyle(fontSize: 12, color: Colors.white60)),
+            const SizedBox(height: 12),
+            for (final profile in _tariffCatalog.profiles)
+              if (profile.configured)
+                ListTile(
+                  leading: const Icon(Icons.local_taxi,
+                    color: Color(0xFF168FFF)),
+                  title: Text(profile.label,
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text('Giá mở cửa: ' +
+                    vnd(profile.tariff!.baseFare)),
+                  trailing: profile.id == _tariffCatalog.activeId
+                    ? const Icon(Icons.check_circle,
+                        color: Color(0xFF2DCE65)) : null,
+                  onTap: () => Navigator.pop(sheetContext, profile.id),
+                ),
+            const Divider(),
+            TextButton.icon(
+              onPressed: () => Navigator.pop(sheetContext, '__manage__'),
+              icon: const Icon(Icons.tune),
+              label: const Text('Tạo / sửa các bảng giá đã lưu')),
+          ]),
+        )),
+      )),
     );
-    if (edited == null || !mounted || !_canChangeFare) return;
-    final profile = TariffProfile(
-      id: 'huong_giang', label: 'Taxi Hương Giang',
-      tariff: edited, verifiedByDriver: true,
-    );
-    await _applyCatalog(_tariffCatalog.save(profile).activate('huong_giang'));
+    if (!mounted || chosen == null) return;
+    if (chosen == '__manage__') {
+      await _tariffDialog();
+      return;
+    }
+    if (!_canChangeFare) {
+      _notify('Chỉ được đổi bảng giá khi chưa bắt đầu chuyến mới.');
+      return;
+    }
+    try {
+      await _applyCatalog(_tariffCatalog.activate(chosen));
+    } catch (error) {
+      if (mounted) _notify('Không chọn được biểu giá: ' + error.toString());
+    }
   }
 
   Future<void> _locateOnMap() async {
