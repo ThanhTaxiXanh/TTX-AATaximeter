@@ -17,9 +17,12 @@ import 'src/payment/vietqr.dart';
 import 'src/ui/payment_dialogs.dart';
 import 'src/ui/trip_history_page.dart';
 import 'src/ui/trip_receipt_dialog.dart';
-import 'src/ui/tariff_settings_dialog.dart';
 import 'src/data/tariff_codec.dart';
 import 'src/data/trip_session_snapshot.dart';
+import 'src/domain/tariff_catalog.dart';
+import 'src/ui/tariff_catalog_page.dart';
+import 'src/ui/tariff_settings_dialog.dart';
+import 'src/ui/dashboard_map.dart';
 import 'src/platform/car_state_bridge.dart';
 import 'src/domain/vehicle_registration.dart';
 import 'src/ui/vehicle_registration_dialog.dart';
@@ -74,6 +77,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   TaximeterEngine meter = TaximeterEngine(tariff: TariffConfig.demo());
   final SharedPreferencesAsync store = SharedPreferencesAsync();
   final TripRepository repository = TripRepository();
+  TariffCatalog _tariffCatalog = TariffCatalog.initial();
+  double? _mapLat;
+  double? _mapLon;
   bool _storageReady = false;
   bool _savingNewTrip = false;
   DateTime _lastCheckpoint = DateTime.fromMillisecondsSinceEpoch(0);
@@ -136,6 +142,16 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           // Invalid stored tariff does not replace the validated preset.
         }
       }
+      TariffCatalog catalog = TariffCatalog.initial(existing: meter.tariff);
+      final savedCatalog = await store.getString('ttx_tariff_catalog_v1');
+      if (savedCatalog != null) {
+        try {
+          catalog = TariffCatalog.decode(savedCatalog);
+          meter.updateTariff(catalog.active.tariff!);
+        } catch (_) {
+          // Legacy tariff remains valid when catalog JSON is malformed.
+        }
+      }
       final rawActive = await repository.loadActive();
       if (rawActive != null) {
         final restored = TripSessionSnapshot.decode(rawActive);
@@ -148,6 +164,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       setState(() {
         _bank = account;
         _vehicle = registration;
+        _tariffCatalog = catalog;
         _storageReady = true;
       });
       await CarStateBridge.publish(meter);
@@ -335,6 +352,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         }
         _trackingPolicy.acceptedFix(now);
         setState(() {
+          _mapLat = position.latitude;
+          _mapLon = position.longitude;
           _gpsStatus = 'GPS nền ±' +
               position.accuracy.toStringAsFixed(0) + ' m';
         });
@@ -684,24 +703,92 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     );
   }
 
-  Future<void> _tariffDialog() async {
-    if (meter.status == MeterStatus.running ||
-        meter.status == MeterStatus.paused) {
-      _notify('Không được thay đổi biểu giá khi chuyến đang chạy');
+  bool get _canChangeFare => meter.status == MeterStatus.idle;
+
+  Future<void> _applyCatalog(TariffCatalog catalog) async {
+    if (!_canChangeFare) {
+      _notify('Kết thúc chuyến trước khi thay bảng giá.');
       return;
     }
-    final chosen = await showDialog<TariffConfig>(
-      context: context,
-      builder: (ctx) => TariffSettingsDialog(current: meter.tariff),
-    );
-    if (chosen == null || !mounted) return;
     try {
-      await store.setString('ttx_tariff_v1', TariffCodec.encode(chosen));
-      if (!mounted) return;
-      setState(() => meter.updateTariff(chosen));
-      _notify('Đã lưu biểu giá và cấu hình GPS cục bộ');
+      catalog.validate();
+      final fare = catalog.active.tariff!;
+      // Persist first: a failed write must not silently change live pricing.
+      await store.setString('ttx_tariff_catalog_v1', catalog.encode());
+      await store.setString('ttx_tariff_v1', TariffCodec.encode(fare));
+      if (!mounted || !_canChangeFare) return;
+      setState(() {
+        meter.updateTariff(fare);
+        _tariffCatalog = catalog;
+      });
+      _notify('Đã chọn bảng giá: ' + catalog.active.label);
     } catch (error) {
-      if (mounted) _notify('Không lưu được cấu hình: ' + error.toString());
+      if (mounted) _notify('Không lưu được biểu giá: ' + error.toString());
+    }
+  }
+
+  Future<void> _tariffDialog() async {
+    if (!_canChangeFare) {
+      _notify('Không đổi biểu giá khi chuyến đang chạy hoặc chưa tạo cuốc mới.');
+      return;
+    }
+    final chosen = await Navigator.of(context).push<TariffCatalog>(
+      MaterialPageRoute(builder: (context) =>
+        TariffCatalogPage(initial: _tariffCatalog)),
+    );
+    if (chosen != null && mounted) await _applyCatalog(chosen);
+  }
+
+  Future<void> _quickHuongGiang() async {
+    if (!_canChangeFare) {
+      _notify('Kết thúc chuyến hiện tại trước khi chọn Taxi Hương Giang.');
+      return;
+    }
+    final existing = _tariffCatalog.find('huong_giang');
+    if (existing?.configured == true) {
+      await _applyCatalog(_tariffCatalog.activate('huong_giang'));
+      return;
+    }
+    final edited = await showDialog<TariffConfig>(
+      context: context,
+      builder: (ctx) => TariffSettingsDialog(
+        companyLabel: 'Taxi Hương Giang',
+        // Placeholder values are zero by design; never invent the firm's fare.
+        current: TariffConfig.demo().copyWith(
+          name: 'Taxi Hương Giang',
+          baseFare: 0,
+          perKmRate: 0,
+          longDistancePerKmRate: 0,
+          waitingFeePerHour: 0,
+          fareTiers: const [
+            FareTier(upToKm: null, ratePerKm: 0),
+          ],
+        ),
+      ),
+    );
+    if (edited == null || !mounted || !_canChangeFare) return;
+    final profile = TariffProfile(
+      id: 'huong_giang', label: edited.name,
+      tariff: edited, verifiedByDriver: true,
+    );
+    await _applyCatalog(_tariffCatalog.save(profile).activate('huong_giang'));
+  }
+
+  Future<void> _locateOnMap() async {
+    if (!await _requestLocationReady()) return;
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+      if (!mounted) return;
+      setState(() {
+        _mapLat = position.latitude;
+        _mapLon = position.longitude;
+      });
+    } catch (error) {
+      if (mounted) _notify('Chưa lấy được vị trí bản đồ: ' + error.toString());
     }
   }
 
@@ -813,7 +900,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     if (_carPreview) return _buildCarMode();
     return Scaffold(
       appBar: AppBar(
-        title: const Text('TTX AATaximeter'),
+        title: const Text('TTX AATaximeter',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
         actions: [
           IconButton(onPressed: _showHistory,
             icon: const Icon(Icons.history), tooltip: 'Lịch sử'),
@@ -883,12 +971,32 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             title: const Text('● LED   CHÚC QUÝ KHÁCH THƯỢNG LỘ BÌNH AN',
               style: TextStyle(color: Color(0xFFFFB800), fontSize: 12)),
           )),
-          const Card(child: ListTile(
+          Card(child: ListTile(
             dense: true,
-            leading: Icon(Icons.navigation, color: Color(0xFF00D8F0)),
-            title: Text('Tên đường: đang cập nhật vị trí...',
-              style: TextStyle(fontSize: 12)),
+            leading: const Icon(Icons.local_taxi,
+              color: Color(0xFFFFB800)),
+            title: Text(_tariffCatalog.active.label,
+              style: const TextStyle(fontWeight: FontWeight.w900)),
+            subtitle: const Text('Chạm để chọn biểu giá khác'),
+            onTap: _tariffDialog,
+            trailing: const Icon(Icons.expand_more),
           )),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: OutlinedButton.icon(
+              onPressed: _quickHuongGiang,
+              icon: const Icon(Icons.swap_horiz),
+              label: Text(_tariffCatalog.activeId == 'huong_giang'
+                  ? 'ĐANG DÙNG TAXI HƯƠNG GIANG'
+                  : 'TAXI HƯƠNG GIANG • CHỌN NHANH'),
+            ),
+          ),
+          DashboardMap(
+            latitude: _mapLat,
+            longitude: _mapLon,
+            onLocate: _locateOnMap,
+          ),
+          const SizedBox(height: 8),
           ReferenceSpeedometer(
             speedKmh: meter.speedKmh,
             speedLimitKmh: meter.tariff.speedLimitKmh,
