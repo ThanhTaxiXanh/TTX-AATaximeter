@@ -253,7 +253,9 @@ class _BankAccountEditorState extends State<BankAccountEditor> {
             ),
           ),
           const SizedBox(height: 6),
-          SizedBox(height: 220,
+          // AlertDialog measures intrinsic width; lazy viewports cannot
+          // report it. Give the bank list a finite width (clamped on phones).
+          SizedBox(height: 220, width: 320,
             child: ListView.builder(
               key: const Key('bank-inline-results'),
               itemCount: widget.catalog.search(_search.text).length,
