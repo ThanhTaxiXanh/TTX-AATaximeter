@@ -91,7 +91,7 @@ class _TollScheduleDialogState extends State<TollScheduleDialog> {
               title: Text(rate.label,
                 maxLines: 2, overflow: TextOverflow.ellipsis),
               subtitle: Text(_fmt(rate.amount)),
-              trailing: Wrap(mainAxisSize: MainAxisSize.min, children: [
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                 IconButton(
                   tooltip: 'Sửa phí BOT',
                   icon: const Icon(Icons.edit_outlined),
