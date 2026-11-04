@@ -16,6 +16,7 @@ import 'src/ui/trip_history_page.dart';
 import 'src/ui/trip_receipt_dialog.dart';
 import 'src/ui/tariff_settings_dialog.dart';
 import 'src/data/tariff_codec.dart';
+import 'src/data/trip_session_snapshot.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -63,11 +64,15 @@ class TaximeterHome extends StatefulWidget {
   State<TaximeterHome> createState() => _TaximeterHomeState();
 }
 
-class _TaximeterHomeState extends State<TaximeterHome> {
-  final TaximeterEngine meter = TaximeterEngine(tariff: TariffConfig.demo());
+class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserver {
+  TaximeterEngine meter = TaximeterEngine(tariff: TariffConfig.demo());
   final SharedPreferencesAsync store = SharedPreferencesAsync();
   final TripRepository repository = TripRepository();
   bool _storageReady = false;
+  bool _savingNewTrip = false;
+  DateTime _lastCheckpoint = DateTime.fromMillisecondsSinceEpoch(0);
+  Future<void> _writeQueue = Future<void>.value();
+  String? _checkpointError;
   TripRecord? _pendingUnsaved;
   VietQrAccount? _bank;
   String _tripPickup = '';
@@ -81,10 +86,12 @@ class _TaximeterHomeState extends State<TaximeterHome> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initializeData();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       setState(() => meter.tick(DateTime.now()));
+      _checkpoint();
     });
   }
 
@@ -110,6 +117,14 @@ class _TaximeterHomeState extends State<TaximeterHome> {
           // Invalid stored tariff does not replace the validated preset.
         }
       }
+      final rawActive = await repository.loadActive();
+      if (rawActive != null) {
+        final restored = TripSessionSnapshot.decode(rawActive);
+        meter = restored.restore();
+        _tripPickup = restored.pickup;
+        _tripDropoff = restored.dropoff;
+        _gpsStatus = 'Chuyến cũ đã được tạm ngắt an toàn';
+      }
       if (!mounted) return;
       setState(() {
         _bank = account;
@@ -123,6 +138,7 @@ class _TaximeterHomeState extends State<TaximeterHome> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
     _gps?.cancel();
     repository.dispose();
@@ -179,12 +195,63 @@ class _TaximeterHomeState extends State<TaximeterHome> {
     }
   }
 
-  void _start() {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if ((state == AppLifecycleState.paused ||
+         state == AppLifecycleState.hidden) &&
+        (meter.status == MeterStatus.running ||
+         meter.status == MeterStatus.paused)) {
+      setState(() => meter.suspendForInterruption());
+      _checkpoint(force: true);
+    }
+  }
+
+  String _sessionPayload() => TripSessionSnapshot.fromEngine(
+    meter, pickup: _tripPickup, dropoff: _tripDropoff,
+  ).encode();
+
+  /// Serialize writes so a slower old checkpoint cannot replace a new one.
+  void _checkpoint({bool force = false}) {
+    if (!_storageReady || _savingNewTrip) return;
+    if (meter.status != MeterStatus.running &&
+        meter.status != MeterStatus.paused) return;
+    final now = DateTime.now();
+    if (!force && now.difference(_lastCheckpoint).inSeconds < 3) return;
+    _lastCheckpoint = now;
+    final data = _sessionPayload(); // immutable snapshot at this instant
+    _writeQueue = _writeQueue.then((_) =>
+      repository.saveActive(data),
+    ).catchError((Object error) {
+      _checkpointError = error.toString();
+    });
+  }
+
+  Future<bool> _saveNewTrip() async {
+    _savingNewTrip = true;
+    try {
+      await _writeQueue;
+      await repository.saveActive(_sessionPayload());
+      _lastCheckpoint = DateTime.now();
+      _checkpointError = null;
+      return true;
+    } catch (error) {
+      if (mounted) _notify('Không lưu được chuyến mới: ' + error.toString());
+      return false;
+    } finally {
+      _savingNewTrip = false;
+    }
+  }
+
+  Future<void> _start() async {
     if (meter.status != MeterStatus.idle || !_storageReady) return;
     _tripPickup = '';
     _tripDropoff = '';
     setState(() => meter.start());
-    _enableGps();
+    if (!await _saveNewTrip()) {
+      if (mounted) setState(meter.reset);
+      return;
+    }
+    if (mounted) _enableGps();
   }
 
   Future<void> _finish() async {
@@ -201,7 +268,8 @@ class _TaximeterHomeState extends State<TaximeterHome> {
     final record = _pendingUnsaved;
     if (record == null) return;
     try {
-      await repository.save(record);
+      await _writeQueue;
+      await repository.completeActive(record);
       if (!mounted) return;
       setState(() => _pendingUnsaved = null);
       _notify('Đã lưu chuyến: ' + vnd(record.receipt.totalFare));
@@ -242,7 +310,11 @@ class _TaximeterHomeState extends State<TaximeterHome> {
     _tripPickup = quote.pickup;
     _tripDropoff = quote.dropoff;
     setState(() => meter.start(fixedFare: quote.amount));
-    _enableGps();
+    if (!await _saveNewTrip()) {
+      if (mounted) setState(meter.reset);
+      return;
+    }
+    if (mounted) _enableGps();
   }
 
   Future<void> _customTollDialog() async {
@@ -497,7 +569,9 @@ class _TaximeterHomeState extends State<TaximeterHome> {
     final statusLabel = switch (status) {
       MeterStatus.idle => 'CHỜ KHÁCH',
       MeterStatus.running => 'ĐANG TÍNH CƯỚC',
-      MeterStatus.paused => 'TẠM DỪNG / TÍNH CHỜ',
+      MeterStatus.paused => meter.requiresManualResume
+          ? 'TẠM NGẮT — CHỜ TIẾP TỤC'
+          : 'TẠM DỪNG / TÍNH CHỜ',
       MeterStatus.finished => 'HOÀN THÀNH',
     };
     if (_carPreview) return _buildCarMode();
@@ -520,7 +594,9 @@ class _TaximeterHomeState extends State<TaximeterHome> {
             leading: const Icon(Icons.gps_fixed, color: Color(0xFF00DA75)),
             title: Text(_gpsStatus, style: const TextStyle(
                 fontSize: 12, color: Color(0xFF00DA75))),
-            trailing: Text(statusLabel, style: const TextStyle(fontSize: 11)),
+            trailing: SizedBox(width: 120, child: Text(statusLabel,
+                maxLines: 2, textAlign: TextAlign.end,
+                style: const TextStyle(fontSize: 11))),
           )),
           Card(child: ListTile(
             dense: true,
