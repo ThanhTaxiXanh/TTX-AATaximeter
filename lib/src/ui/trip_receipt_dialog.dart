@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../domain/trip_record.dart';
+import 'fare_breakdown_section.dart';
 
 String _vnd(num n) => n.round().toString()
   .replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => '.') + ' đ';
@@ -41,6 +42,9 @@ class _TripReceiptDialogState extends State<TripReceiptDialog> {
       'Kết thúc: ' + r.receipt.endedAt.toString() + '\n'
       'Điểm đón: ' + r.pickup + '\n'
       'Điểm trả: ' + r.dropoff + '\n'
+      'Bảng giá: ' + r.fareProfileName + '\n'
+      'Loại xe: ' + r.vehicleType + '\n'
+      'Biển số: ' + r.vehiclePlate + '\n'
       'Quãng đường: ' + r.receipt.distanceKm.toStringAsFixed(2) + ' km\n'
       'Cước: ' + _vnd(r.receipt.totalFare) + '\n'
       'Hình thức thanh toán: ' + _method.label;
@@ -72,6 +76,14 @@ class _TripReceiptDialogState extends State<TripReceiptDialog> {
                   color: Color(0xFFFFB800),
                   fontSize: 35, fontWeight: FontWeight.w900)),
               const SizedBox(height: 8),
+              if (widget.record.fareProfileName.isNotEmpty)
+                Text('Bảng giá: ' + widget.record.fareProfileName,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold)),
+              if (widget.record.vehicleType.isNotEmpty)
+                Text('Loại xe: ' + widget.record.vehicleType),
+              if (widget.record.vehiclePlate.isNotEmpty)
+                Text('Biển số: ' + widget.record.vehiclePlate),
               if (widget.record.pickup.isNotEmpty)
                 Text('Điểm đón: ' + widget.record.pickup),
               if (widget.record.dropoff.isNotEmpty)
@@ -85,17 +97,31 @@ class _TripReceiptDialogState extends State<TripReceiptDialog> {
                 ' km  •  Thời gian chờ: ' +
                 (r.waitingSeconds ~/ 60).toString() + ' phút'),
               const SizedBox(height: 8),
-              _line(r.isFlatFare ? 'Cước bao giá' : 'Cước mở cửa',
-                r.baseFare),
-              if (!r.isFlatFare) ...[
-                _line('Cước theo km', r.distanceFare),
-                _line('Cước chờ', r.waitingFare),
+              if (widget.record.tariffSnapshot != null)
+                FareBreakdownSection(
+                  tariff: widget.record.tariffSnapshot!,
+                  distanceKm: r.distanceKm,
+                  tripStarted: true,
+                  totalFare: r.totalFare,
+                  isFlatFare: r.isFlatFare,
+                  waitingFare: r.waitingFare,
+                  tollFee: r.tollFee,
+                  surcharge: r.surcharge,
+                  discount: r.discount,
+                )
+              else ...[
+                _line(r.isFlatFare ? 'Cước bao giá' : 'Cước mở cửa',
+                  r.baseFare),
+                if (!r.isFlatFare) ...[
+                  _line('Cước theo km', r.distanceFare),
+                  _line('Cước chờ', r.waitingFare),
+                ],
+                _line('Phí BOT', r.tollFee),
+                _line('Phụ thu', r.surcharge),
+                _line('Giảm giá', -r.discount),
+                const Divider(),
+                _line('TỔNG THANH TOÁN', r.totalFare, strong: true),
               ],
-              _line('Phí BOT', r.tollFee),
-              _line('Phụ thu', r.surcharge),
-              _line('Giảm giá', -r.discount),
-              const Divider(),
-              _line('TỔNG THANH TOÁN', r.totalFare, strong: true),
               const SizedBox(height: 8),
               const Text('Phương thức thanh toán đã chọn:'),
               Wrap(spacing: 6, children: [
