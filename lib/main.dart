@@ -8,6 +8,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'src/core/taximeter_engine.dart';
 import 'src/ui/reference_speedometer.dart';
 import 'src/ui/quote_dialog.dart';
+import 'src/data/trip_repository.dart';
+import 'src/domain/trip_record.dart';
+import 'src/payment/vietqr.dart';
+import 'src/ui/payment_dialogs.dart';
+import 'src/ui/trip_history_page.dart';
+import 'src/ui/trip_receipt_dialog.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -58,41 +64,50 @@ class TaximeterHome extends StatefulWidget {
 class _TaximeterHomeState extends State<TaximeterHome> {
   final TaximeterEngine meter = TaximeterEngine(tariff: TariffConfig.demo());
   final SharedPreferencesAsync store = SharedPreferencesAsync();
+  final TripRepository repository = TripRepository();
+  bool _storageReady = false;
+  TripRecord? _pendingUnsaved;
+  VietQrAccount? _bank;
+  String _tripPickup = '';
+  String _tripDropoff = '';
   Timer? _ticker;
   StreamSubscription<Position>? _gps;
   bool _carPreview = false;
   bool _carMirror = false;
   String _gpsStatus = 'Chưa kích hoạt GPS';
-  List<Map<String, dynamic>> _history = [];
 
   @override
   void initState() {
     super.initState();
-    _loadHistory();
+    _initializeData();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       setState(() => meter.tick(DateTime.now()));
     });
   }
 
-  Future<void> _loadHistory() async {
+  Future<void> _initializeData() async {
     try {
-      final saved = await store.getString('ttx_history_v1');
-      if (saved == null) return;
-      final decoded = jsonDecode(saved) as List<dynamic>;
+      await repository.initializeAndMigrate(legacyPreferences: store);
+      final encodedBank = await store.getString('ttx_vietqr_account_v1');
+      VietQrAccount? account;
+      if (encodedBank != null) {
+        try {
+          final data = Map<String, dynamic>.from(jsonDecode(encodedBank) as Map);
+          final found = VietQrAccount.fromJson(data);
+          if (found.isValid) account = found;
+        } catch (_) {
+          // Broken optional bank settings should never block completed trips.
+        }
+      }
       if (!mounted) return;
-      setState(() => _history = decoded
-          .whereType<Map<String, dynamic>>().toList());
-    } catch (_) {
-      if (mounted) setState(() => _gpsStatus = 'Không đọc được lịch sử cũ');
-    }
-  }
-
-  Future<void> _saveHistory() async {
-    try {
-      await store.setString('ttx_history_v1', jsonEncode(_history));
-    } catch (_) {
-      if (mounted) _notify('Không lưu được lịch sử, kiểm tra bộ nhớ');
+      setState(() {
+        _bank = account;
+        _storageReady = true;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      _notify('Lỗi khởi tạo lịch sử SQLite: ' + error.toString());
     }
   }
 
@@ -100,6 +115,7 @@ class _TaximeterHomeState extends State<TaximeterHome> {
   void dispose() {
     _ticker?.cancel();
     _gps?.cancel();
+    repository.dispose();
     super.dispose();
   }
 
@@ -154,26 +170,58 @@ class _TaximeterHomeState extends State<TaximeterHome> {
   }
 
   void _start() {
-    if (meter.status != MeterStatus.idle) return;
+    if (meter.status != MeterStatus.idle || !_storageReady) return;
+    _tripPickup = '';
+    _tripDropoff = '';
     setState(() => meter.start());
     _enableGps();
   }
 
-  void _finish() {
+  Future<void> _finish() async {
     if (meter.status != MeterStatus.running &&
         meter.status != MeterStatus.paused) return;
-    late final TripReceipt receipt;
-    setState(() {
-      receipt = meter.finish();
-      _history.insert(0, receipt.toJson());
-    });
-    _saveHistory();
-    _notify('Đã hoàn thành: ${vnd(receipt.totalFare)}');
+    final finished = meter.finish();
+    final record = TripRecord.fromReceipt(
+      finished, pickup: _tripPickup, dropoff: _tripDropoff);
+    setState(() => _pendingUnsaved = record);
+    await _saveCompletedRecord();
+  }
+
+  Future<void> _saveCompletedRecord() async {
+    final record = _pendingUnsaved;
+    if (record == null) return;
+    try {
+      await repository.save(record);
+      if (!mounted) return;
+      setState(() => _pendingUnsaved = null);
+      _notify('Đã lưu chuyến: ' + vnd(record.receipt.totalFare));
+      final method = await showDialog<PaymentMethod>(
+        context: context,
+        builder: (dialogContext) => TripReceiptDialog(
+          record: record,
+          onQr: () => _showQr(record.receipt.totalFare.round()),
+        ),
+      );
+      if (method != null) {
+        await repository.save(record.copyWith(paymentMethod: method));
+        if (mounted) setState(() {
+          meter.reset();
+          _tripPickup = '';
+          _tripDropoff = '';
+          _carPreview = false;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        _notify('Không lưu được chuyến. Nhấn THỬ LƯU LẠI trước khi tạo cuốc mới: '
+          + error.toString());
+      }
+    }
   }
 
   Future<void> _flatFareDialog() async {
-    if (meter.status != MeterStatus.idle) {
-      _notify('Kết thúc cuốc hiện tại trước khi tạo báo giá mới');
+    if (meter.status != MeterStatus.idle || !_storageReady) {
+      _notify('Hoàn thành chuyến hiện tại và chờ dữ liệu sẵn sàng trước khi báo giá');
       return;
     }
     final quote = await showDialog<QuoteResult>(
@@ -181,6 +229,8 @@ class _TaximeterHomeState extends State<TaximeterHome> {
       builder: (context) => QuoteDialog(tariff: meter.tariff),
     );
     if (!mounted || quote == null || quote.amount <= 0) return;
+    _tripPickup = quote.pickup;
+    _tripDropoff = quote.dropoff;
     setState(() => meter.start(fixedFare: quote.amount));
     _enableGps();
   }
@@ -315,7 +365,10 @@ class _TaximeterHomeState extends State<TaximeterHome> {
                   ? const Color(0xFFFF304C) : const Color(0xFF00DA75),
               foregroundColor: Colors.black),
             onPressed: active ? _finish : (meter.status == MeterStatus.idle
-                ? _start : () => setState(meter.reset)),
+                ? (_storageReady ? _start : null)
+                : (_pendingUnsaved == null
+                    ? () => setState(meter.reset)
+                    : _saveCompletedRecord)),
             child: Text(active ? 'KẾT THÚC' :
                 (meter.status == MeterStatus.idle
                     ? 'BẮT ĐẦU CHUYẾN' : 'CUỐC MỚI'),
@@ -385,58 +438,58 @@ class _TaximeterHomeState extends State<TaximeterHome> {
   }
 
   void _showHistory() {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (context) {
-        final total = _history.fold<double>(0,
-            (acc, x) => acc + ((x['totalFare'] as num?)?.toDouble() ?? 0));
-        return SafeArea(child: SizedBox(
-          height: MediaQuery.sizeOf(context).height * 0.70,
-          child: Column(children: [
-            Text('Lịch sử • ${_history.length} chuyến',
-                style: Theme.of(context).textTheme.titleLarge),
-            Text('Doanh thu: ${vnd(total)}'),
-            const Divider(),
-            Expanded(child: _history.isEmpty
-                ? const Center(child: Text('Chưa có chuyến đi'))
-                : ListView.builder(
-                    itemCount: _history.length,
-                    itemBuilder: (context, index) {
-                      final item = _history[index];
-                      return ListTile(
-                        leading: const Icon(Icons.receipt_long),
-                        title: Text(vnd((item['totalFare'] as num?) ?? 0)),
-                        subtitle: Text(
-                          '${item['startedAt']} • '
-                          '${((item['distanceKm'] as num?) ?? 0).toStringAsFixed(2)} km',
-                        ),
-                        trailing: const Icon(Icons.check_circle_outline),
-                      );
-                    },
-                  )),
-          ]),
-        ));
-      },
-    );
+    if (!_storageReady) {
+      _notify('Cơ sở dữ liệu chưa sẵn sàng');
+      return;
+    }
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (ctx) => TripHistoryPage(
+        repository: repository,
+        onQr: (amount) => _showQr(amount),
+      ),
+    ));
   }
 
-  void _showQr() => showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('VietQR chuyển khoản'),
-          content: const Text(
-            'Chưa có tài khoản ngân hàng được cấu hình. '
-            'Bản MVP không tự dùng thông tin tài khoản trong APK gốc. '
-            'Module VietQR động sẽ được bổ sung ở P1.',
-          ),
-          actions: [
-            FilledButton(onPressed: () => Navigator.pop(context),
-                child: const Text('Đóng')),
-          ],
-        ),
-      );
+  Future<VietQrAccount?> _configureBank() async {
+    final chosen = await showDialog<VietQrAccount>(
+      context: context,
+      builder: (ctx) => BankAccountDialog(initial: _bank),
+    );
+    if (chosen == null || !mounted) return _bank;
+    try {
+      await store.setString('ttx_vietqr_account_v1',
+        jsonEncode(chosen.toJson()));
+      if (mounted) setState(() => _bank = chosen);
+      return chosen;
+    } catch (error) {
+      if (mounted) _notify('Không lưu được cấu hình ngân hàng: '
+          + error.toString());
+      return null;
+    }
+  }
+
+  Future<void> _showQr([int? value]) async {
+    final amount = value ?? meter.totalFare.round();
+    if (amount <= 0) {
+      _notify('Cần có số tiền cước lớn hơn 0 để tạo mã QR động');
+      return;
+    }
+    var account = _bank;
+    if (account == null || !account.isValid) {
+      account = await _configureBank();
+    }
+    if (account == null || !mounted) return;
+    final memo = 'TTX CUOC ' + DateTime.now()
+        .millisecondsSinceEpoch.toString();
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => PaymentQrDialog(
+        account: account!,
+        amountVnd: amount,
+        memo: memo,
+      ),
+    );
+  }
 
   Widget _infoCard(String label, String value, IconData icon) {
     return Card(
@@ -471,6 +524,9 @@ class _TaximeterHomeState extends State<TaximeterHome> {
         actions: [
           IconButton(onPressed: _showHistory,
             icon: const Icon(Icons.history), tooltip: 'Lịch sử'),
+          IconButton(onPressed: _configureBank,
+            icon: const Icon(Icons.account_balance),
+            tooltip: 'Tài khoản VietQR'),
           IconButton(onPressed: _tariffDialog,
             icon: const Icon(Icons.tune), tooltip: 'Cài giá'),
         ],
@@ -555,11 +611,11 @@ class _TaximeterHomeState extends State<TaximeterHome> {
           if (status == MeterStatus.idle)
             Column(children: [
               SizedBox(width: double.infinity, child: FilledButton.icon(
-                onPressed: _start, icon: const Icon(Icons.play_arrow),
+                onPressed: _storageReady ? _start : null, icon: const Icon(Icons.play_arrow),
                 label: const Text('BẮT ĐẦU TÍNH CƯỚC CHUẨN'),
               )),
               SizedBox(width: double.infinity, child: OutlinedButton.icon(
-                onPressed: _flatFareDialog, icon: const Icon(Icons.price_check),
+                onPressed: _storageReady ? _flatFareDialog : null, icon: const Icon(Icons.price_check),
                 label: const Text('TÍNH TRƯỚC / BAO GIÁ TRỌN GÓI (1 & 2 CHIỀU)'),
               )),
             ]),
@@ -599,9 +655,13 @@ class _TaximeterHomeState extends State<TaximeterHome> {
           ],
           if (status == MeterStatus.finished)
             SizedBox(width: double.infinity, child: FilledButton.icon(
-              onPressed: () => setState(meter.reset),
-              icon: const Icon(Icons.restart_alt),
-              label: const Text('CHUYẾN MỚI'),
+              onPressed: _pendingUnsaved == null
+                ? () => setState(meter.reset)
+                : _saveCompletedRecord,
+              icon: Icon(_pendingUnsaved == null
+                ? Icons.restart_alt : Icons.save),
+              label: Text(_pendingUnsaved == null
+                ? 'CHUYẾN MỚI' : 'THỬ LƯU LẠI CHUYẾN'),
             )),
           SwitchListTile(
             title: const Text('Chế độ xe hơi • CAR MODE'),
@@ -611,9 +671,9 @@ class _TaximeterHomeState extends State<TaximeterHome> {
           ),
           const Divider(),
           Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-            TextButton.icon(onPressed: _showQr,
+            TextButton.icon(onPressed: () => _showQr(),
                 icon: const Icon(Icons.qr_code_2), label: const Text('Mã QR')),
-            TextButton.icon(onPressed: _flatFareDialog,
+            TextButton.icon(onPressed: () => _flatFareDialog(),
                 icon: const Icon(Icons.calculate_outlined),
                 label: const Text('Bao giá')),
             TextButton.icon(onPressed: _showHistory,
