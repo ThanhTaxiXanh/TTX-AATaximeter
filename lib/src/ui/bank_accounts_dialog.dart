@@ -5,15 +5,18 @@ import '../payment/brand_logo_storage.dart';
 import '../payment/vietqr.dart';
 
 class BankAccountsDialog extends StatefulWidget {
-  const BankAccountsDialog({super.key, required this.initial});
+  const BankAccountsDialog({super.key, required this.initial, this.catalog});
   final BankBook initial;
+  final BankCatalog? catalog;
   @override
   State<BankAccountsDialog> createState() => _BankAccountsDialogState();
 }
 
 class _BankAccountsDialogState extends State<BankAccountsDialog> {
   late BankBook _book = widget.initial;
-  late final Future<BankCatalog> _catalog = BankCatalog.load();
+  late final Future<BankCatalog> _catalog = widget.catalog == null
+      ? BankCatalog.load(refresh: false)
+      : Future<BankCatalog>.value(widget.catalog!);
 
   Future<void> _edit([SavedBankAccount? old]) async {
     try {
@@ -174,6 +177,8 @@ class _BankAccountEditorState extends State<BankAccountEditor> {
     text: widget.initial?.account.accountName ?? '');
   VietQrBank? _bank;
   String? _error;
+  final TextEditingController _search = TextEditingController();
+  bool _bankPickerOpen = false;
 
   @override
   void initState() {
@@ -185,46 +190,21 @@ class _BankAccountEditorState extends State<BankAccountEditor> {
   }
   @override
   void dispose() {
+    _search.dispose();
     _number.dispose(); _owner.dispose();
     super.dispose();
   }
 
-  Future<void> _chooseBank() async {
-    final search = TextEditingController();
-    final chosen = await showModalBottomSheet<VietQrBank>(
-      context: context, showDragHandle: true, isScrollControlled: true,
-      builder: (ctx) => SafeArea(child: Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(ctx).bottom),
-        child: StatefulBuilder(builder: (ctx, update) => SizedBox(
-          height: MediaQuery.sizeOf(ctx).height * .68,
-          child: Column(children: [
-            Padding(padding: const EdgeInsets.all(12), child: TextField(
-              controller: search, autofocus: true,
-              onChanged: (_) => update(() {}),
-              decoration: const InputDecoration(
-                labelText: 'Tìm tên ngân hàng hoặc BIN',
-                prefixIcon: Icon(Icons.search)))),
-            Expanded(child: ListView(children: [
-              for (final bank in widget.catalog.search(search.text))
-                ListTile(
-                  title: Text(bank.shortName),
-                  subtitle: Text(bank.name + ' • BIN ' + bank.bin),
-                  enabled: bank.transferSupported,
-                  trailing: !bank.transferSupported
-                    ? const Text('Chưa hỗ trợ nhận', style:
-                        TextStyle(fontSize: 10, color: Colors.orangeAccent))
-                    : null,
-                  onTap: bank.transferSupported
-                    ? () => Navigator.pop(ctx, bank) : null,
-                ),
-            ])),
-          ]),
-        )),
-      )),
-    );
-    search.dispose();
-    if (chosen != null && mounted) setState(() => _bank = chosen);
+  // Render search inside THIS editor, not inside another modal route.
+  // The search controller is owned by State and is disposed only after
+  // the TextField is removed from the widget tree.
+  void _chooseBank() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _bankPickerOpen = !_bankPickerOpen;
+      _search.clear();
+      _error = null;
+    });
   }
 
   void _save() {
@@ -261,6 +241,48 @@ class _BankAccountEditorState extends State<BankAccountEditor> {
             ? 'Chọn ngân hàng theo tên'
             : _bank!.shortName + ' • ' + _bank!.bin),
         ),
+        if (_bankPickerOpen) ...[
+          const SizedBox(height: 8),
+          TextField(
+            key: const Key('bank-search-field'),
+            controller: _search,
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search),
+              labelText: 'Tìm theo ngân hàng hoặc mã BIN',
+            ),
+          ),
+          const SizedBox(height: 6),
+          SizedBox(height: 220,
+            child: ListView.builder(
+              key: const Key('bank-inline-results'),
+              itemCount: widget.catalog.search(_search.text).length,
+              itemBuilder: (ctx, index) {
+                final bank = widget.catalog.search(_search.text)[index];
+                return ListTile(
+                  dense: true,
+                  title: Text(bank.shortName),
+                  subtitle: Text(bank.name + ' • BIN ' + bank.bin),
+                  enabled: bank.transferSupported,
+                  trailing: !bank.transferSupported
+                    ? const Text('Chưa hỗ trợ', style: TextStyle(
+                        color: Colors.orangeAccent, fontSize: 10))
+                    : null,
+                  onTap: bank.transferSupported
+                    ? () {
+                        FocusManager.instance.primaryFocus?.unfocus();
+                        setState(() {
+                          _bank = bank;
+                          _bankPickerOpen = false;
+                          _search.clear();
+                        });
+                      }
+                    : null,
+                );
+              },
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
         TextField(
           controller: _number, maxLength: 19,
