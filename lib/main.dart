@@ -104,6 +104,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   final LocationTrackingPolicy _trackingPolicy = LocationTrackingPolicy();
   bool _gpsStarting = false;
   bool _appVisible = true;
+  bool _mapLocating = false;
   bool _carPreview = false;
   bool _carMirror = false;
   String _gpsStatus = 'Chưa kích hoạt GPS';
@@ -190,13 +191,14 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         _storageReady = true;
       });
       await CarStateBridge.publish(meter);
-      if (registration == null && mounted) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted && _vehicle == null) {
-            _configureVehicle();
-          }
-        });
-      }
+      // Request location at first launch; automatically center the map.
+      // Registration comes later so two dialogs never overlap.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        unawaited(_initialLocationSetup(
+          needsVehicle: registration == null,
+        ));
+      });
     } catch (error) {
       if (!mounted) return;
       _notify('Lỗi khởi tạo lịch sử SQLite: ' + error.toString());
@@ -219,8 +221,140 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     );
   }
 
-  /// Foreground-only permission flow: location FGS must start from a visible
-  /// activity on Android 12+/14+ unless Android grants a specific exemption.
+  /// First launch: an explanatory, one-time foreground permission request.
+  /// Android 11+ grants "Always allow" through app-specific settings after
+  /// foreground permission; never combine both runtime permission requests.
+  Future<void> _initialLocationSetup({required bool needsVehicle}) async {
+    if (!mounted) return;
+    try {
+      final initial = await Geolocator.checkPermission();
+      if (initial == LocationPermission.denied) {
+        final asked = await store.getBool('ttx_location_onboarded_v1') ?? false;
+        if (!asked && mounted && _appVisible) {
+          await store.setBool('ttx_location_onboarded_v1', true);
+          if (!mounted) return;
+          final approved = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Cấp quyền định vị cho đồng hồ taxi'),
+              content: const Text('Ứng dụng dùng GPS để hiển thị vị trí và '
+                'ghi quãng đường của chuyến bạn chủ động bắt đầu. '
+                'Khi chuyến đang chạy, một thông báo theo dõi vị trí sẽ '
+                'được hiển thị. Bạn có thể từ chối và cấp lại trong Cài đặt.'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Để sau')),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Cấp quyền vị trí')),
+              ],
+            ),
+          );
+          if (approved == true && mounted && _appVisible) {
+            await Geolocator.requestPermission();
+          }
+        }
+      }
+      if (!mounted || !_appVisible) return;
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.always ||
+          permission == LocationPermission.whileInUse) {
+        await _refreshMapLocation();
+        if (mounted && _appVisible &&
+            permission != LocationPermission.always) {
+          final askedBackground =
+              await store.getBool('ttx_background_explained_v1') ?? false;
+          if (!askedBackground && mounted && _appVisible) {
+            await store.setBool('ttx_background_explained_v1', true);
+            if (mounted) await _explainAlwaysLocation();
+          }
+        }
+      } else if (mounted) {
+        setState(() => _gpsStatus = 'Chưa cấp quyền GPS; chạm nút vị trí trên bản đồ');
+      }
+      if (needsVehicle && mounted && _appVisible && _vehicle == null) {
+        await _configureVehicle();
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _gpsStatus = 'Không lấy được quyền GPS: ' + error.toString());
+      }
+    }
+  }
+
+  /// Background access is an explicit, separate choice via Android Settings.
+  /// Consent does not guarantee that Android/OEM keeps Dart alive if force-stop
+  /// or battery optimization kills the process.
+  Future<void> _explainAlwaysLocation() async {
+    if (!mounted || !_appVisible ||
+        defaultTargetPlatform != TargetPlatform.android) return;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cho phép vị trí mọi lúc'),
+        content: const Text('Để hỗ trợ đồng hồ taxi khi chuyển ứng dụng '
+          'hoặc khóa màn hình, bạn có thể mở Quyền vị trí rồi chọn '
+          '“Luôn cho phép” / “Allow all the time” và “Vị trí chính xác”. '
+          'Ứng dụng chỉ tính cước khi bạn bắt đầu chuyến, có thông báo '
+          'GPS nền và vẫn có thể tạm ngắt nếu mất tín hiệu. '
+          'Thoát bằng Buộc dừng hoặc hệ thống dừng tiến trình không '
+          'được bảo đảm tiếp tục tính cước.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Để sau')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Mở cài đặt quyền')),
+        ],
+      ),
+    );
+    if (go == true && mounted) {
+      await Geolocator.openAppSettings();
+    }
+  }
+
+  Future<void> _refreshMapLocation() async {
+    if (!mounted || _mapLocating || !_appVisible) return;
+    // The active trip's GPS stream already supplies live location.
+    if (_gps != null) return;
+    _mapLocating = true;
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) {
+        if (mounted) setState(() => _gpsStatus = 'GPS đang tắt trong hệ thống');
+        return;
+      }
+      final permission = await Geolocator.checkPermission();
+      if (permission != LocationPermission.always &&
+          permission != LocationPermission.whileInUse) return;
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 25),
+        ),
+      );
+      if (!mounted || !_appVisible) return;
+      if (!position.latitude.isFinite || !position.longitude.isFinite ||
+          position.latitude.abs() > 90 ||
+          position.longitude.abs() > 180) return;
+      setState(() {
+        _mapLat = position.latitude;
+        _mapLon = position.longitude;
+        _gpsStatus = 'Đã định vị GPS';
+      });
+    } catch (error) {
+      if (mounted && _appVisible) {
+        setState(() => _gpsStatus =
+            'GPS chưa xác định được vị trí; thử lại khi tín hiệu tốt');
+      }
+    } finally {
+      _mapLocating = false;
+    }
+  }
+
+  /// Location FGS can only be started by a visible Activity without a
+  /// platform exemption. Background permission is NEVER a workaround for
+  /// secretly starting metering when the user has stopped the app.
   Future<bool> _requestLocationReady() async {
     if (!_appVisible || !mounted) return false;
     try {
@@ -404,6 +538,11 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     _appVisible = state != AppLifecycleState.hidden &&
         state != AppLifecycleState.paused &&
         state != AppLifecycleState.detached;
+    if (state == AppLifecycleState.resumed) {
+      // Returning from Android app settings or switching apps auto-refocuses.
+      unawaited(_refreshMapLocation());
+      return;
+    }
     if (state != AppLifecycleState.hidden &&
         state != AppLifecycleState.paused) return;
     if (meter.status != MeterStatus.running &&
@@ -413,8 +552,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     if (!safe) {
       _suspendForGps('GPS chưa sẵn sàng khi ra nền: chuyến đã tạm ngắt');
     }
-    // If the service keeps providing fresh fixes, meter and checkpoint continue.
-    // Crash recovery is still conservative: restore as paused.
+    // Healthy FGS continues only while the Android process stays alive.
   }
 
   String _sessionPayload() => TripSessionSnapshot.fromEngine(
@@ -898,20 +1036,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
 
   Future<void> _locateOnMap() async {
     if (!await _requestLocationReady()) return;
-    try {
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
-      );
-      if (!mounted) return;
-      setState(() {
-        _mapLat = position.latitude;
-        _mapLon = position.longitude;
-      });
-    } catch (error) {
-      if (mounted) _notify('Chưa lấy được vị trí bản đồ: ' + error.toString());
-    }
+    await _refreshMapLocation();
   }
 
   void _showHistory() {
@@ -1121,6 +1246,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       case 'tollSchedule':
         _configureTollSchedule();
         return;
+      case 'locationPermission':
+        _explainAlwaysLocation();
+        return;
       default:
         return;
     }
@@ -1164,6 +1292,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                 child: Text('Nhập phí BOT tùy chỉnh')),
               PopupMenuItem(value: 'tollSchedule',
                 child: Text('Cài đặt bảng giá phí cầu đường (BOT)')),
+              PopupMenuItem(value: 'locationPermission',
+                child: Text('Quyền định vị “Luôn cho phép”')),
             ],
             icon: const Icon(Icons.more_vert),
           ),

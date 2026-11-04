@@ -36,6 +36,7 @@ permissions = subprocess.check_output(
 required = (
     "android.permission.ACCESS_FINE_LOCATION",
     "android.permission.ACCESS_COARSE_LOCATION",
+    "android.permission.ACCESS_BACKGROUND_LOCATION",
     "android.permission.FOREGROUND_SERVICE",
     "android.permission.FOREGROUND_SERVICE_LOCATION",
     "android.permission.WAKE_LOCK",
