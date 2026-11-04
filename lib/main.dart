@@ -17,6 +17,7 @@ import 'src/ui/trip_receipt_dialog.dart';
 import 'src/ui/tariff_settings_dialog.dart';
 import 'src/data/tariff_codec.dart';
 import 'src/data/trip_session_snapshot.dart';
+import 'src/platform/car_state_bridge.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -130,6 +131,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         _bank = account;
         _storageReady = true;
       });
+      await CarStateBridge.publish(meter);
     } catch (error) {
       if (!mounted) return;
       _notify('Lỗi khởi tạo lịch sử SQLite: ' + error.toString());
@@ -221,9 +223,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     if (!force && now.difference(_lastCheckpoint).inSeconds < 3) return;
     _lastCheckpoint = now;
     final data = _sessionPayload(); // immutable snapshot at this instant
-    _writeQueue = _writeQueue.then((_) =>
-      repository.saveActive(data),
-    ).catchError((Object error) {
+    _writeQueue = _writeQueue.then((_) async {
+      await repository.saveActive(data);
+      await CarStateBridge.publish(meter);
+    }).catchError((Object error) {
       _checkpointError = error.toString();
     });
   }
@@ -233,6 +236,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     try {
       await _writeQueue;
       await repository.saveActive(_sessionPayload());
+      await CarStateBridge.publish(meter);
       _lastCheckpoint = DateTime.now();
       _checkpointError = null;
       return true;
@@ -272,6 +276,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     try {
       await _writeQueue;
       await repository.completeActive(record);
+      await CarStateBridge.publish(meter);
       if (!mounted) return;
       setState(() => _pendingUnsaved = null);
       _notify('Đã lưu chuyến: ' + vnd(record.receipt.totalFare));
@@ -290,6 +295,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           _tripDropoff = '';
           _carPreview = false;
         });
+        await CarStateBridge.publish(meter);
       }
     } catch (error) {
       if (mounted) {
