@@ -716,30 +716,51 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   }
 
   Future<void> _customTollDialog() async {
-    final input = TextEditingController();
-    final amount = await showDialog<double>(context: context,
+    if (meter.status != MeterStatus.running &&
+        meter.status != MeterStatus.paused) {
+      _notify('Chỉ cộng phí BOT khi đang có chuyến');
+      return;
+    }
+    // No manually disposed TextEditingController: the old modal could be
+    // torn down while its route was still animating, triggering framework
+    // lifecycle assertions on some Android builds.
+    var typed = '';
+    final amount = await showDialog<double>(
+      context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Thêm phí BOT / cầu đường'),
-        content: TextField(controller: input,
+        title: const Text('Nhập phí trạm thu phí (BOT)'),
+        content: TextField(
+          autofocus: true,
           keyboardType: TextInputType.number,
+          onChanged: (value) => typed = value,
           decoration: const InputDecoration(
-            labelText: 'Số tiền (đ)', hintText: 'Ví dụ: 35000')),
+            labelText: 'Phí BOT một lượt (₫)',
+            hintText: 'Ví dụ: 35000'),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Hủy')),
-          FilledButton(onPressed: () =>
-            Navigator.pop(dialogContext, double.tryParse(input.text)),
-            child: const Text('Cộng phí')),
+          FilledButton(
+            onPressed: () {
+              final parsed = double.tryParse(
+                typed.trim().replaceAll('.', '').replaceAll(',', ''));
+              if (parsed == null || !parsed.isFinite ||
+                  parsed <= 0 || parsed > 2000000) {
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(content: Text(
+                    'Nhập phí từ 1 đến 2.000.000 ₫')));
+                return;
+              }
+              Navigator.pop(dialogContext, parsed);
+            },
+            child: const Text('Cộng phí BOT')),
         ],
       ),
     );
-    input.dispose();
-    if (!mounted || amount == null || amount < 0) return;
-    if (meter.status != MeterStatus.running &&
-        meter.status != MeterStatus.paused) {
-      _notify('Chỉ cộng phí khi đang có chuyến');
-      return;
-    }
+    if (!mounted || amount == null ||
+        (meter.status != MeterStatus.running &&
+        meter.status != MeterStatus.paused)) return;
     setState(() => meter.addToll(amount));
     _checkpoint(force: true);
   }
