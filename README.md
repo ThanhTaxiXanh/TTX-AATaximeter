@@ -64,3 +64,13 @@ Chi tiết GPS nền và bài thử nghiệm trên thiết bị: [DEVICE_TEST_PL
 - **Giới hạn bản đồ:** đây là bản đồ OSM raster 2D trên điện thoại, KHÔNG phải điều hướng/dẫn đường, 3D tòa nhà, dữ liệu biển tốc độ, Android Auto hay bản đồ đã được kiểm tra pixel-perfect theo hai video mới. Tên đường vẫn cần reverse geocoding riêng.
 - **Tuân thủ OSM:** tile.openstreetmap.org là hạ tầng cộng đồng, chỉ thích hợp để phát triển/thử nghiệm ở mức sử dụng nhỏ với ghi công, nhận dạng ứng dụng, không prefetch/offline/bulk download. Để dùng lâu dài trong ứng dụng taxi, cần nhà cung cấp tiles được phép sử dụng thương mại, cache tuân thủ TTL tối thiểu và đánh giá chính sách: https://operations.osmfoundation.org/policies/tiles/
 - Bố cục hiện dựa trên yêu cầu và các video tham chiếu cũ. Hai video vừa tải lên cần đối chiếu trực quan từng khung hình trước khi xác nhận "clone 1:1"; **chưa xác nhận đạt pixel-perfect**.
+
+## Phiên bản 0.5: Dashboard gọn theo ảnh tham chiếu 3–4 (thử nghiệm)
+- Bỏ đồng hồ tốc độ dạng vòng tròn lớn khỏi Dashboard điện thoại. Tốc độ là nhãn nổi bên trong bản đồ; dưới bản đồ có card tốc độ/quãng đường.
+- Header tối, bản đồ OSM, ô nhập điểm đến (chỉ lưu mô tả; chưa tự dẫn đường), card tên biểu giá, tổng cước đỏ lớn, nút Bắt đầu/Tạm dừng/Dừng lại, các dòng tính cước theo bậc và thanh Đồng hồ cước | Doanh thu.
+- Chạm card tên hãng mở danh sách các biểu giá đã lưu và được tài xế cấu hình. Không còn nút Hương Giang riêng; màn cài đặt dùng tạo/sửa bảng giá. Không chuyển giá khi chuyến đang chạy.
+- Loại xe, biển số không xuất hiện trên Dashboard. Chúng được ghi vào snapshot khi bắt đầu chuyến, lưu cùng biên lai và hiển thị khi xem lại lịch sử, cùng biểu giá đã áp dụng trong chuyến.
+- Từng bậc hiển thị số km bắt đầu/kết thúc, km đã dùng / độ dài bậc, đơn giá và thành tiền; chi phí chờ, BOT, phụ phí, giảm giá và làm tròn cũng nằm trong chi tiết cuối.
+- Ví dụ giả lập, KHÔNG phải bảng giá chính thức: mở cửa 30.000đ đến 1,5km; bậc 1 từ 1,5km đến 30km dài 28,5km; sau 10km chỉ tính 8,5km trong bậc 1.
+- Các tiện ích đăng ký xe, VietQR, báo giá, Car Mode/HUD trên điện thoại và BOT tùy chỉnh vẫn có trong menu.
+- Bản đồ chưa có chỉ đường/vệ tinh; Android Auto host thực tế chưa hoạt động; bản debug không được kiểm định thu cước taxi.
