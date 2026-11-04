@@ -149,12 +149,12 @@ class _DashboardMapState extends State<DashboardMap> {
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min, children: [
-                Text(speedKmh.round().toString() + ' km/h',
+                Text(widget.speedKmh.round().toString() + ' km/h',
                   style: const TextStyle(
                     color: Color(0xFFFF4549), fontSize: 20,
                     fontWeight: FontWeight.w900)),
                 Text('Giới hạn cài đặt: ' +
-                    speedLimitKmh.round().toString() + ' km/h',
+                    widget.speedLimitKmh.round().toString() + ' km/h',
                   style: const TextStyle(
                     color: Colors.white70, fontSize: 9)),
               ]),
