@@ -869,19 +869,128 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     );
   }
 
-  Widget _infoCard(String label, String value, IconData icon) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(children: [
-          Icon(icon, size: 20, color: Colors.amberAccent),
-          const SizedBox(height: 5),
-          Text(value, style: const TextStyle(
-              fontSize: 19, fontWeight: FontWeight.w700)),
-          Text(label, style: const TextStyle(fontSize: 12)),
+  Widget _metricTile({
+    required String label, required String value,
+    required IconData icon,
+  }) => Container(
+    margin: const EdgeInsets.symmetric(horizontal: 3),
+    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 14),
+    decoration: BoxDecoration(
+      color: const Color(0xFF202023),
+      borderRadius: BorderRadius.circular(14),
+    ),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(label, style: const TextStyle(
+        color: Colors.white60, fontSize: 12)),
+      const SizedBox(height: 5),
+      Row(children: [
+        Icon(icon, color: const Color(0xFFFF4549), size: 19),
+        const SizedBox(width: 7),
+        Expanded(child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(value, style: const TextStyle(
+            fontSize: 25, fontWeight: FontWeight.w800,
+            color: Color(0xFFFF4549),
+            fontFeatures: [FontFeature.tabularFigures()],
+          )),
+        )),
+      ]),
+    ]),
+  );
+
+  Widget _selectedCompanyCard(MeterStatus status) {
+    final active = status == MeterStatus.running ||
+        status == MeterStatus.paused;
+    final label = _tariffCatalog.active.label;
+    final stateText = meter.requiresManualResume
+        ? 'Tạm ngắt'
+        : status == MeterStatus.running ? 'Đang chạy'
+        : status == MeterStatus.paused ? 'Tạm dừng'
+        : status == MeterStatus.finished ? 'Hoàn tất' : 'Chờ khách';
+    return InkWell(
+      key: const Key('fare-profile-selector'),
+      onTap: _showTariffSelector,
+      borderRadius: BorderRadius.circular(15),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: active ? const Color(0xFF202023)
+              : const Color(0xFF118BFB),
+          borderRadius: BorderRadius.circular(15),
+        ),
+        child: Row(children: [
+          const Icon(Icons.local_taxi,
+            color: Colors.white, size: 30),
+          const SizedBox(width: 12),
+          Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label,
+                maxLines: 2, overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 17, fontWeight: FontWeight.w800,
+                  color: Colors.white)),
+              if (!active && status == MeterStatus.idle)
+                Text('Mở cửa: ' + vnd(meter.tariff.baseFare),
+                  style: const TextStyle(color: Colors.white70)),
+              if (active)
+                Text(stateText + '  •  ' +
+                  (meter.elapsedSeconds ~/ 60).toString() + ' phút',
+                  style: TextStyle(color: meter.requiresManualResume
+                    ? const Color(0xFFFFA332)
+                    : const Color(0xFF26C65A))),
+              if (status == MeterStatus.finished)
+                const Text('Chuyến đã kết thúc',
+                  style: TextStyle(color: Colors.white70)),
+            ],
+          )),
+          const SizedBox(width: 4),
+          const Icon(Icons.keyboard_arrow_down, color: Colors.white),
         ]),
       ),
     );
+  }
+
+  Widget _mainFareCard() => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 22),
+    decoration: BoxDecoration(
+      color: const Color(0xFF202023),
+      borderRadius: BorderRadius.circular(16)),
+    child: Column(children: [
+      const Text('Thành tiền', style: TextStyle(
+        color: Colors.white60, fontSize: 14)),
+      const SizedBox(height: 5),
+      FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(vnd(meter.totalFare),
+          key: const Key('live-fare-total'),
+          style: const TextStyle(
+            color: Color(0xFFFF4549),
+            fontSize: 59,
+            fontWeight: FontWeight.w900,
+            fontFeatures: [FontFeature.tabularFigures()],
+          )),
+      ),
+    ]),
+  );
+
+  void _showTools(String choice) {
+    switch (choice) {
+      case 'vehicle':
+        _configureVehicle();
+      case 'bank':
+        _configureBank();
+      case 'quote':
+        _flatFareDialog();
+      case 'qr':
+        _showQr();
+      case 'car':
+        setState(() => _carPreview = true);
+      case 'toll':
+        _customTollDialog();
+    }
   }
 
   @override
@@ -889,270 +998,242 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     final status = meter.status;
     final active = status == MeterStatus.running ||
         status == MeterStatus.paused;
-    final statusLabel = switch (status) {
-      MeterStatus.idle => 'CHỜ KHÁCH',
-      MeterStatus.running => 'ĐANG TÍNH CƯỚC',
-      MeterStatus.paused => meter.requiresManualResume
-          ? 'TẠM NGẮT — CHỜ TIẾP TỤC'
-          : 'TẠM DỪNG / TÍNH CHỜ',
-      MeterStatus.finished => 'HOÀN THÀNH',
-    };
     if (_carPreview) return _buildCarMode();
+
     return Scaffold(
+      backgroundColor: const Color(0xFF09090A),
       appBar: AppBar(
-        title: const Text('TTX AATaximeter',
-          style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+        backgroundColor: const Color(0xFF080809),
+        title: const Text('Đồng hồ cước taxi, xe ôm',
+          maxLines: 1, overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
         actions: [
-          IconButton(onPressed: _showHistory,
-            icon: const Icon(Icons.history), tooltip: 'Lịch sử'),
-          IconButton(onPressed: () { _configureVehicle(); },
-            icon: const Icon(Icons.directions_car),
-            tooltip: 'Đăng ký xe / biển số'),
-          IconButton(onPressed: _configureBank,
-            icon: const Icon(Icons.account_balance),
-            tooltip: 'Tài khoản VietQR'),
-          IconButton(onPressed: _tariffDialog,
-            icon: const Icon(Icons.tune), tooltip: 'Cài giá'),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Quản lý bảng giá cước',
+            onPressed: _tariffDialog,
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'Tiện ích và cấu hình',
+            onSelected: _showTools,
+            itemBuilder: (ctx) => const [
+              PopupMenuItem(value: 'vehicle',
+                child: Text('Cài đặt xe và biển số')),
+              PopupMenuItem(value: 'bank',
+                child: Text('Tài khoản ngân hàng VietQR')),
+              PopupMenuItem(value: 'quote',
+                child: Text('Báo giá chuyến đi')),
+              PopupMenuItem(value: 'qr',
+                child: Text('Mã QR thanh toán')),
+              PopupMenuItem(value: 'car',
+                child: Text('Chế độ Car Mode / HUD trên điện thoại')),
+              PopupMenuItem(value: 'toll',
+                child: Text('Nhập phí BOT tùy chỉnh')),
+            ],
+            icon: const Icon(Icons.more_vert),
+          ),
         ],
       ),
-      body: SafeArea(
-        child: ListView(padding: const EdgeInsets.all(12), children: [
-          if (meter.status == MeterStatus.running &&
-              !_trackingPolicy.hasTrustedFix)
-            const Card(child: ListTile(
-              leading: Icon(Icons.gps_not_fixed, color: Colors.orangeAccent),
-              title: Text('Đang xác định vị trí GPS'),
-              subtitle: Text('Chưa cộng km và phí chờ khi chưa có tín hiệu '
-                  'GPS chính xác; dịch vụ sẽ tạm ngắt nếu quá lâu.'),
-            )),
-          if (meter.requiresManualResume)
-            const Card(child: ListTile(
-              leading: Icon(Icons.pause_circle, color: Colors.orangeAccent),
-              title: Text('Đã khôi phục chuyến ở trạng thái an toàn'),
-              subtitle: Text('Không tính thêm phí trong khoảng gián đoạn. '
-                  'Bấm TIẾP TỤC để tiếp tục chuyến.'),
-            )),
-          if (_checkpointError != null)
-            Card(child: ListTile(
-              leading: const Icon(Icons.warning_amber, color: Colors.redAccent),
-              title: const Text('Không ghi được bản sao chuyến mới nhất'),
-              subtitle: Text(_checkpointError!),
-              trailing: IconButton(icon: const Icon(Icons.refresh),
-                onPressed: () => setState(() {
-                  _checkpointError = null;
-                  _checkpoint(force: true);
-                })),
-            )),
-          if (_vehicle != null)
-            Card(child: ListTile(
-              dense: true,
-              leading: const Icon(Icons.local_taxi,
-                  color: Color(0xFFFFB800)),
-              title: Text(_vehicle!.category.label + ' • ' + _vehicle!.plate,
-                style: const TextStyle(fontWeight: FontWeight.w700)),
-              trailing: IconButton(
-                onPressed: () { _configureVehicle(); },
-                icon: const Icon(Icons.edit_outlined),
-                tooltip: 'Chỉnh thông tin xe',
-              ),
-            )),
-          Card(child: ListTile(
-            leading: const Icon(Icons.gps_fixed, color: Color(0xFF00DA75)),
-            title: Text(_gpsStatus, style: const TextStyle(
-                fontSize: 12, color: Color(0xFF00DA75))),
-            trailing: SizedBox(width: 120, child: Text(statusLabel,
-                maxLines: 2, textAlign: TextAlign.end,
-                style: const TextStyle(fontSize: 11))),
-          )),
-          Card(child: ListTile(
-            dense: true,
-            leading: const Icon(Icons.campaign_outlined,
-                color: Color(0xFFFFB800)),
-            title: const Text('● LED   CHÚC QUÝ KHÁCH THƯỢNG LỘ BÌNH AN',
-              style: TextStyle(color: Color(0xFFFFB800), fontSize: 12)),
-          )),
-          Card(child: ListTile(
-            dense: true,
-            leading: const Icon(Icons.local_taxi,
-              color: Color(0xFFFFB800)),
-            title: Text(_tariffCatalog.active.label,
-              style: const TextStyle(fontWeight: FontWeight.w900)),
-            subtitle: const Text('Chạm để chọn biểu giá khác'),
-            onTap: _tariffDialog,
-            trailing: const Icon(Icons.expand_more),
-          )),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: OutlinedButton.icon(
-              onPressed: _quickHuongGiang,
-              icon: const Icon(Icons.swap_horiz),
-              label: Text(_tariffCatalog.activeId == 'huong_giang'
-                  ? 'ĐANG DÙNG TAXI HƯƠNG GIANG'
-                  : 'TAXI HƯƠNG GIANG • CHỌN NHANH'),
-            ),
-          ),
-          Container(
-            padding: EdgeInsets.symmetric(
-                vertical: _carPreview ? 45 : 25, horizontal: 14),
-            decoration: BoxDecoration(
-              color: const Color(0xFF111829),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.amber.shade700, width: 1),
-            ),
-            child: Column(children: [
-              Text('TỔNG TIỀN CƯỚC',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 10),
-              FittedBox(child: Text(vnd(meter.totalFare),
-                style: TextStyle(
-                  color: Colors.amberAccent,
-                  fontSize: 46,
-                  fontWeight: FontWeight.w900,
-                ),
-              )),
-              Text(meter.tariff.name, style: const TextStyle(fontSize: 12)),
-            ]),
-          ),
-          const SizedBox(height: 8),
+      body: SafeArea(child: ListView(
+        padding: const EdgeInsets.fromLTRB(12, 7, 12, 20),
+        children: [
           DashboardMap(
-            latitude: _mapLat,
-            longitude: _mapLon,
-            onLocate: _locateOnMap,
-          ),
-          const SizedBox(height: 8),
-          ReferenceSpeedometer(
+            latitude: _mapLat, longitude: _mapLon,
             speedKmh: meter.speedKmh,
             speedLimitKmh: meter.tariff.speedLimitKmh,
+            onLocate: _locateOnMap,
           ),
-          const SizedBox(height: 8),
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(child: _infoCard('Tốc độ', '${meter.speedKmh.toStringAsFixed(0)} km/h',
-                Icons.speed)),
-            Expanded(child: _infoCard('Quãng đường', '${meter.distanceKm.toStringAsFixed(2)} km',
-                Icons.route)),
-          ]),
-          Row(children: [
-            Expanded(child: _infoCard('Thời gian', clock(meter.elapsedSeconds),
-                Icons.schedule)),
-            Expanded(child: _infoCard('Chờ', clock(meter.waitingSeconds),
-                Icons.hourglass_bottom)),
-          ]),
-          if (meter.isOverSpeedLimit)
-            const Card(child: ListTile(
-                leading: Icon(Icons.warning_amber, color: Colors.orange),
-                title: Text('Vượt ngưỡng tốc độ cài đặt'))),
-          Card(child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(children: [
-              _fareRow('Mở cửa', meter.baseFare),
-              _fareRow('Cước quãng đường', meter.distanceFare),
-              _fareRow('Cước chờ', meter.waitingFare),
-              _fareRow('Phí BOT', meter.tollFee),
-              _fareRow('Phụ thu', meter.surcharge),
-              _fareRow('Giảm giá', -meter.discount),
-            ]),
-          )),
           const SizedBox(height: 7),
+          if (_gpsStatus.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 3, bottom: 7),
+              child: Text(_gpsStatus,
+                maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white54, fontSize: 11)),
+            ),
+          if (status == MeterStatus.idle)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: TextField(
+                controller: _destinationController,
+                decoration: const InputDecoration(
+                  hintText: 'Nhập địa chỉ điểm đến...',
+                  hintStyle: TextStyle(color: Colors.white38),
+                  filled: true, fillColor: Color(0xFF141417),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 13),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ),
+          _selectedCompanyCard(status),
+          const SizedBox(height: 10),
+          _mainFareCard(),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(child: _metricTile(
+              label: 'Quãng đường',
+              value: meter.distanceKm.toStringAsFixed(2) + ' km',
+              icon: Icons.route)),
+            Expanded(child: _metricTile(
+              label: 'Tốc độ',
+              value: meter.speedKmh.toStringAsFixed(1) + ' km/h',
+              icon: Icons.speed)),
+          ]),
+          const SizedBox(height: 11),
           if (status == MeterStatus.idle)
             Column(children: [
-              SizedBox(width: double.infinity, child: FilledButton.icon(
-                onPressed: _storageReady ? _start : null, icon: const Icon(Icons.play_arrow),
-                label: const Text('BẮT ĐẦU TÍNH CƯỚC CHUẨN'),
-              )),
-              SizedBox(width: double.infinity, child: OutlinedButton.icon(
-                onPressed: _storageReady ? _flatFareDialog : null, icon: const Icon(Icons.price_check),
-                label: const Text('TÍNH TRƯỚC / BAO GIÁ TRỌN GÓI (1 & 2 CHIỀU)'),
-              )),
+              SizedBox(width: double.infinity, height: 58,
+                child: FilledButton(
+                  onPressed: _storageReady ? _start : null,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF22C953),
+                    foregroundColor: Colors.white),
+                  child: const Text('Bắt đầu',
+                    style: TextStyle(fontSize: 19,
+                      fontWeight: FontWeight.w800)),
+                )),
+              TextButton.icon(
+                onPressed: _storageReady ? _flatFareDialog : null,
+                icon: const Icon(Icons.calculate_outlined),
+                label: const Text('Báo giá chuyến đi / giá trọn gói')),
             ]),
           if (active) ...[
             Row(children: [
-              Expanded(child: FilledButton.icon(
-                onPressed: () {
-                  if (status == MeterStatus.paused) {
-                    _resumeTrip();
-                  } else {
-                    setState(() => meter.pause());
-                    _checkpoint(force: true);
-                  }
-                },
-                icon: Icon(status == MeterStatus.running ?
-                    Icons.pause : Icons.play_arrow),
-                label: Text(status == MeterStatus.running ?
-                    'TẠM DỪNG' : 'TIẾP TỤC'),
-              )),
-              const SizedBox(width: 8),
-              Expanded(child: FilledButton.icon(
-                onPressed: _finish, icon: const Icon(Icons.stop),
-                label: const Text('KẾT THÚC'),
-              )),
+              Expanded(child: SizedBox(height: 58,
+                child: FilledButton.icon(
+                  onPressed: status == MeterStatus.paused
+                      ? _resumeTrip
+                      : () {
+                          setState(() => meter.pause());
+                          _checkpoint(force: true);
+                        },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF982A),
+                    foregroundColor: Colors.white),
+                  icon: Icon(status == MeterStatus.paused
+                      ? Icons.play_arrow : Icons.pause),
+                  label: Text(status == MeterStatus.paused
+                      ? 'Tiếp tục' : 'Tạm dừng',
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                ))),
+              const SizedBox(width: 10),
+              Expanded(child: SizedBox(height: 58,
+                child: FilledButton(
+                  onPressed: _finish,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF4247),
+                    foregroundColor: Colors.white),
+                  child: const Text('Dừng lại',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                ))),
             ]),
-            Wrap(spacing: 8, children: [
-              ActionChip(label: const Text('+10.000đ BOT'), onPressed: () {
-                setState(() => meter.addToll(10000));
-                _checkpoint(force: true);
-              }),
-              ActionChip(label: const Text('+20.000đ BOT'), onPressed: () {
-                setState(() => meter.addToll(20000));
-                _checkpoint(force: true);
-              }),
-              ActionChip(label: const Text('+35.000đ BOT'), onPressed: () {
-                setState(() => meter.addToll(35000));
-                _checkpoint(force: true);
-              }),
-              ActionChip(label: const Text('+50.000đ BOT'), onPressed: () {
-                setState(() => meter.addToll(50000));
-                _checkpoint(force: true);
-              }),
-              ActionChip(label: const Text('✎ Tùy chỉnh'),
-                  onPressed: _customTollDialog),
-            ]),
+            ExpansionTile(
+              title: const Text('Phí BOT / phụ thu', style: TextStyle(
+                fontSize: 13, color: Colors.white70)),
+              dense: true,
+              children: [
+                Wrap(spacing: 6, children: [
+                  for (final fee in [10000, 20000, 35000, 50000])
+                    ActionChip(
+                      label: Text('+' + (fee ~/ 1000).toString() + 'k'),
+                      onPressed: () {
+                        setState(() => meter.addToll(fee.toDouble()));
+                        _checkpoint(force: true);
+                      },
+                    ),
+                  ActionChip(label: const Text('Tùy chỉnh'),
+                    onPressed: _customTollDialog),
+                ]),
+              ],
+            ),
           ],
           if (status == MeterStatus.finished)
-            SizedBox(width: double.infinity, child: FilledButton.icon(
-              onPressed: _pendingUnsaved == null
-                ? () => setState(meter.reset)
-                : _saveCompletedRecord,
-              icon: Icon(_pendingUnsaved == null
-                ? Icons.restart_alt : Icons.save),
-              label: Text(_pendingUnsaved == null
-                ? 'CHUYẾN MỚI' : 'THỬ LƯU LẠI CHUYẾN'),
-            )),
-          SwitchListTile(
-            title: const Text('Chế độ xe hơi • CAR MODE'),
-            subtitle: const Text('Bố cục toàn màn hình trên điện thoại; có HUD lật ngang'),
-            value: _carPreview,
-            onChanged: (value) => setState(() => _carPreview = value),
+            SizedBox(width: double.infinity, height: 54,
+              child: FilledButton.icon(
+                onPressed: _pendingUnsaved == null
+                  ? () {
+                      setState(() {
+                        meter.reset();
+                        _destinationController.clear();
+                      });
+                    }
+                  : _saveCompletedRecord,
+                icon: Icon(_pendingUnsaved == null
+                  ? Icons.restart_alt : Icons.save),
+                label: Text(_pendingUnsaved == null
+                  ? 'Chuyến mới' : 'THỬ LƯU LẠI CHUYẾN'),
+              )),
+          if (meter.requiresManualResume)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 7),
+              child: Text('Chuyến đã tạm ngắt an toàn. '
+                'Chỉ tiếp tục khi GPS đã sẵn sàng.',
+                style: TextStyle(color: Color(0xFFFFA332))),
+            ),
+          if (active && !_trackingPolicy.hasTrustedFix &&
+              !meter.requiresManualResume)
+            const Text('Đang xác định GPS; chưa cộng cước chờ khi mất tín hiệu.',
+              style: TextStyle(fontSize: 12, color: Colors.orangeAccent)),
+          if (_checkpointError != null)
+            ListTile(
+              title: const Text('Lỗi lưu trạng thái chuyến',
+                style: TextStyle(color: Colors.redAccent)),
+              subtitle: Text(_checkpointError!,
+                maxLines: 2, overflow: TextOverflow.ellipsis),
+              trailing: IconButton(
+                onPressed: () => setState(() {
+                  _checkpointError = null;
+                  _checkpoint(force: true);
+                }),
+                icon: const Icon(Icons.refresh)),
+            ),
+          const SizedBox(height: 12),
+          const Text('Chi tiết tính tiền',
+            style: TextStyle(fontSize: 19,
+              fontWeight: FontWeight.w800, color: Colors.white)),
+          const SizedBox(height: 10),
+          FareBreakdownSection(
+            tariff: meter.tariff,
+            distanceKm: meter.distanceKm,
+            tripStarted: status != MeterStatus.idle,
+            totalFare: meter.totalFare,
+            isFlatFare: meter.flatFare != null,
+            waitingFare: meter.waitingFare,
+            tollFee: meter.tollFee,
+            surcharge: meter.surcharge,
+            discount: meter.discount,
           ),
-          const Divider(),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-            TextButton.icon(onPressed: () => _showQr(),
-                icon: const Icon(Icons.qr_code_2), label: const Text('Mã QR')),
-            TextButton.icon(onPressed: () => _flatFareDialog(),
-                icon: const Icon(Icons.calculate_outlined),
-                label: const Text('Bao giá')),
-            TextButton.icon(onPressed: _showHistory,
-                icon: const Icon(Icons.history),
-                label: const Text('Lịch sử')),
-            TextButton.icon(onPressed: _tariffDialog,
-                icon: const Icon(Icons.settings),
-                label: const Text('Cài đặt')),
-          ]),
-          const SizedBox(height: 20),
+          const SizedBox(height: 6),
           const Center(child: Text(
-            'MVP thử nghiệm • Chưa dùng tính tiền thương mại',
-            style: TextStyle(fontSize: 11, color: Colors.white54),
-          )),
-        ]),
+            'Phiên bản thử nghiệm • Chưa sử dụng thu cước thương mại',
+            style: TextStyle(color: Colors.white38, fontSize: 10))),
+        ],
+      )),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: NavigationBar(
+          height: 68,
+          backgroundColor: const Color(0xFF202023),
+          indicatorColor: const Color(0xFF101014),
+          selectedIndex: 0,
+          onDestinationSelected: (index) {
+            if (index == 1) _showHistory();
+          },
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.speed_outlined),
+              selectedIcon: Icon(Icons.speed, color: Color(0xFF168FFF)),
+              label: 'Đồng hồ cước',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.bar_chart_rounded),
+              label: 'Doanh thu',
+            ),
+          ],
+        ),
       ),
     );
   }
-
-  Widget _fareRow(String label, double amount) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3),
-        child: Row(children: [
-          Expanded(child: Text(label)),
-          Text(vnd(amount), style: const TextStyle(fontWeight: FontWeight.w600)),
-        ]),
-      );
 }

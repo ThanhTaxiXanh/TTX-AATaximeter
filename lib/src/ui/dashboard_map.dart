@@ -8,10 +8,12 @@ import 'package:latlong2/latlong.dart';
 class DashboardMap extends StatefulWidget {
   const DashboardMap({
     super.key, required this.latitude, required this.longitude,
-    required this.onLocate,
+    required this.onLocate, required this.speedKmh,
+    required this.speedLimitKmh,
   });
   final double? latitude, longitude;
   final VoidCallback onLocate;
+  final double speedKmh, speedLimitKmh;
   @override
   State<DashboardMap> createState() => _DashboardMapState();
 }
@@ -65,7 +67,7 @@ class _DashboardMapState extends State<DashboardMap> {
   @override
   Widget build(BuildContext context) => ClipRRect(
     borderRadius: BorderRadius.circular(17),
-    child: SizedBox(height: 265, child: Stack(children: [
+    child: SizedBox(height: 335, child: Stack(children: [
       FlutterMap(
         mapController: controller,
         options: MapOptions(
@@ -135,6 +137,29 @@ class _DashboardMapState extends State<DashboardMap> {
             () { if (mapReady) controller.rotate(0); },
             'Trở về hướng Bắc'),
         ]),
+      ),
+      Positioned(bottom: 8, left: 8,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: const Color(0xEB10131D),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFF303543)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min, children: [
+                Text(speedKmh.round().toString() + ' km/h',
+                  style: const TextStyle(
+                    color: Color(0xFFFF4549), fontSize: 20,
+                    fontWeight: FontWeight.w900)),
+                Text('Giới hạn cài đặt: ' +
+                    speedLimitKmh.round().toString() + ' km/h',
+                  style: const TextStyle(
+                    color: Colors.white70, fontSize: 9)),
+              ]),
+          ),
+        ),
       ),
       Positioned(bottom: 5, right: 7,
         child: Container(

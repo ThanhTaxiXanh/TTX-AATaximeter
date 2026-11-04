@@ -1,5 +1,6 @@
 import 'dart:convert';
 import '../core/taximeter_engine.dart';
+import '../data/tariff_codec.dart';
 
 enum PaymentMethod {
   cash, bankTransfer, card;
@@ -18,28 +19,42 @@ class TripRecord {
   const TripRecord({
     required this.id, required this.receipt,
     this.pickup = '', this.dropoff = '',
+    this.vehicleType = '', this.vehiclePlate = '',
+    this.fareProfileName = '', this.tariffSnapshot,
     this.paymentMethod = PaymentMethod.cash,
   });
   final String id;
   final TripReceipt receipt;
   final String pickup, dropoff;
+  final String vehicleType, vehiclePlate, fareProfileName;
+  final TariffConfig? tariffSnapshot;
   final PaymentMethod paymentMethod;
 
   TripRecord copyWith({PaymentMethod? paymentMethod}) => TripRecord(
     id: id, receipt: receipt, pickup: pickup, dropoff: dropoff,
+    vehicleType: vehicleType, vehiclePlate: vehiclePlate,
+    fareProfileName: fareProfileName, tariffSnapshot: tariffSnapshot,
     paymentMethod: paymentMethod ?? this.paymentMethod,
   );
 
   factory TripRecord.fromReceipt(TripReceipt receipt,
-      {String pickup = '', String dropoff = ''}) => TripRecord(
+      {String pickup = '', String dropoff = '',
+       String vehicleType = '', String vehiclePlate = '',
+       String fareProfileName = '', TariffConfig? tariffSnapshot}) => TripRecord(
     id: receipt.startedAt.microsecondsSinceEpoch.toString() +
         '-' + receipt.endedAt.microsecondsSinceEpoch.toString(),
     receipt: receipt, pickup: pickup, dropoff: dropoff,
+    vehicleType: vehicleType, vehiclePlate: vehiclePlate,
+    fareProfileName: fareProfileName, tariffSnapshot: tariffSnapshot,
   );
 
   Map<String, dynamic> toJson() => {
-    'version': 2, 'id': id, 'receipt': receipt.toJson(),
+    'version': 3, 'id': id, 'receipt': receipt.toJson(),
     'pickup': pickup, 'dropoff': dropoff,
+    'vehicleType': vehicleType, 'vehiclePlate': vehiclePlate,
+    'fareProfileName': fareProfileName,
+    'tariff': tariffSnapshot == null
+        ? null : jsonDecode(TariffCodec.encode(tariffSnapshot!)),
     'paymentMethod': paymentMethod.name,
   };
   String encode() => jsonEncode(toJson());
@@ -84,6 +99,11 @@ class TripRecord {
       receipt: receipt,
       pickup: json['pickup']?.toString() ?? '',
       dropoff: json['dropoff']?.toString() ?? '',
+      vehicleType: json['vehicleType']?.toString() ?? '',
+      vehiclePlate: json['vehiclePlate']?.toString() ?? '',
+      fareProfileName: json['fareProfileName']?.toString() ?? '',
+      tariffSnapshot: json['tariff'] is Map
+          ? TariffCodec.decode(jsonEncode(json['tariff'])) : null,
       paymentMethod: PaymentMethod.fromCode(
         json['paymentMethod']?.toString()),
     );

@@ -10,22 +10,29 @@ class TripSessionSnapshot {
     required this.tariff,
     required this.pickup,
     required this.dropoff,
+    this.vehicleType = '', this.vehiclePlate = '',
+    this.fareProfileName = '',
   });
 
   final Map<String, dynamic> meter;
   final TariffConfig tariff;
   final String pickup;
   final String dropoff;
+  final String vehicleType, vehiclePlate, fareProfileName;
 
   factory TripSessionSnapshot.fromEngine(
     TaximeterEngine engine, {
     String pickup = '',
     String dropoff = '',
+    String vehicleType = '', String vehiclePlate = '',
+    String fareProfileName = '',
   }) => TripSessionSnapshot(
     meter: engine.exportSnapshot(),
     tariff: engine.tariff,
     pickup: pickup,
     dropoff: dropoff,
+    vehicleType: vehicleType, vehiclePlate: vehiclePlate,
+    fareProfileName: fareProfileName,
   );
 
   String encode() => jsonEncode({
@@ -34,6 +41,8 @@ class TripSessionSnapshot {
     'tariff': jsonDecode(TariffCodec.encode(tariff)),
     'pickup': pickup,
     'dropoff': dropoff,
+    'vehicleType': vehicleType, 'vehiclePlate': vehiclePlate,
+    'fareProfileName': fareProfileName,
   });
 
   factory TripSessionSnapshot.decode(String json) {
@@ -48,6 +57,9 @@ class TripSessionSnapshot {
       tariff: savedTariff,
       pickup: root['pickup']?.toString() ?? '',
       dropoff: root['dropoff']?.toString() ?? '',
+      vehicleType: root['vehicleType']?.toString() ?? '',
+      vehiclePlate: root['vehiclePlate']?.toString() ?? '',
+      fareProfileName: root['fareProfileName']?.toString() ?? '',
     );
   }
 
