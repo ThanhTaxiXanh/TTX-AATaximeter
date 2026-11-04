@@ -31,7 +31,7 @@ class VietQrPaymentPanel extends StatelessWidget {
           label: const Text('Cài đặt tài khoản ngân hàng')),
       ]);
     }
-    String? payload;
+    late final String payload;
     try {
       payload = saved.account.emvPayload(
         amountVnd: amountVnd, memo: memo);
@@ -117,7 +117,7 @@ class PaymentQrDialog extends StatelessWidget {
           TextButton(onPressed: () => Navigator.pop(context),
             child: const Text('Đóng')),
         ]),
-      )),
+      ),
     )),
   );
 }

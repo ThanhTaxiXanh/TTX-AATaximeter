@@ -8,7 +8,7 @@ import 'package:path_provider/path_provider.dart';
 class BrandLogoStorage {
   static const allowed = ['png','jpg','jpeg','webp','gif','bmp','svg'];
   static Future<String?> importLogo({required String slot}) async {
-    final picked = await FilePicker.platform.pickFile(
+    final picked = await FilePicker.pickFile(
       type: FileType.custom,
       allowedExtensions: allowed,
     );

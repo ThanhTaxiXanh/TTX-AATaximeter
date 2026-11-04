@@ -276,7 +276,7 @@ class _BankAccountEditorState extends State<BankAccountEditor> {
           'chủ tài khoản với ngân hàng.',
           style: TextStyle(color: Colors.white60, fontSize: 11)),
       ]),
-    )),
+    ),
     actions: [
       TextButton(onPressed: () => Navigator.pop(context),
         child: const Text('Hủy')),
