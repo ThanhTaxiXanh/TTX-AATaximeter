@@ -108,7 +108,6 @@ class _TollScheduleDialogState extends State<TollScheduleDialog> {
             icon: const Icon(Icons.add), label: const Text('Thêm trạm BOT')),
         ]),
       )),
-    ),
     actions: [
       TextButton(onPressed: () => Navigator.pop(context),
         child: const Text('Hủy')),
