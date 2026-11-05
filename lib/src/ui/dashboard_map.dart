@@ -36,6 +36,11 @@ class _DashboardMapState extends State<DashboardMap> {
   final fm.MapController _map = fm.MapController();
   final GlobalKey<DriveMap3DState> _driveKey = GlobalKey<DriveMap3DState>();
   bool _ready = false, _follow = true;
+  // Route points are append-only within a trip. Rebuild polyline geometries
+  // only when the number/tail changes, not on every 1-second fare tick.
+  int _cachedRouteCount = -1;
+  TripRoutePoint? _cachedRouteTail;
+  List<fm.Polyline> _cachedRouteLines = const [];
 
   bool get _hasFix {
     final lat = widget.latitude, lon = widget.longitude;
@@ -103,18 +108,27 @@ class _DashboardMapState extends State<DashboardMap> {
   }
 
   List<fm.Polyline> get _routeLines {
+    final count = widget.routePoints.length;
+    final tail = count == 0 ? null : widget.routePoints.last;
+    if (count == _cachedRouteCount &&
+        identical(tail, _cachedRouteTail)) return _cachedRouteLines;
     final bySegment = <int, List<ll.LatLng>>{};
     for (final p in widget.routePoints) {
       bySegment.putIfAbsent(p.segment, () => []).add(
         ll.LatLng(p.latitude, p.longitude));
     }
-    return bySegment.values.where((points) => points.length > 1)
+    _cachedRouteLines = bySegment.values.where((points) => points.length > 1)
         .map((points) => fm.Polyline(
           points: points, strokeWidth: 5,
-          color: const Color(0xFF08B8F4))).toList();
+          color: const Color(0xFF08B8F4))).toList(growable: false);
+    _cachedRouteCount = count;
+    _cachedRouteTail = tail;
+    return _cachedRouteLines;
   }
 
-  Widget _twoD() => fm.FlutterMap(
+  Widget _twoD() {
+    final routeLines = _routeLines;
+    return fm.FlutterMap(
     mapController: _map,
     options: fm.MapOptions(
       initialCenter: _hasFix
@@ -147,7 +161,7 @@ class _DashboardMapState extends State<DashboardMap> {
           maxNativeZoom: 19,
         ),
       ),
-      if (_routeLines.isNotEmpty) fm.PolylineLayer(polylines: _routeLines),
+      if (routeLines.isNotEmpty) fm.PolylineLayer(polylines: routeLines),
       if (_hasFix) fm.MarkerLayer(markers: [
         fm.Marker(
           point: _position, width: 46, height: 46,
@@ -162,7 +176,8 @@ class _DashboardMapState extends State<DashboardMap> {
         ),
       ]),
     ],
-  );
+    );
+  }
 
   Widget _button(Widget child, VoidCallback tap, String hint) => Padding(
     padding: const EdgeInsets.only(bottom: 5),
