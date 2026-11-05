@@ -1408,112 +1408,208 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     );
   }
 
-  Widget _metricTile({
-    required String label, required String value,
-    required IconData icon,
-  }) => Container(
-    margin: const EdgeInsets.symmetric(horizontal: 3),
-    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 14),
-    decoration: BoxDecoration(
-      color: const Color(0xFF202023),
-      borderRadius: BorderRadius.circular(14),
-    ),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: const TextStyle(
-        color: Colors.white60, fontSize: 12)),
-      const SizedBox(height: 5),
-      Row(children: [
-        Icon(icon, color: const Color(0xFFFF4549), size: 19),
-        const SizedBox(width: 7),
-        Expanded(child: FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text(value, style: const TextStyle(
-            fontSize: 25, fontWeight: FontWeight.w800,
-            color: Color(0xFFFF4549),
-            fontFeatures: [FontFeature.tabularFigures()],
-          )),
-        )),
-      ]),
-    ]),
-  );
-
   Widget _selectedCompanyCard(MeterStatus status) {
     final active = status == MeterStatus.running ||
         status == MeterStatus.paused;
-    final label = status == MeterStatus.idle ||
-            _tripFareProfileName.isEmpty
+    final label = status == MeterStatus.idle || _tripFareProfileName.isEmpty
         ? _tariffCatalog.active.label : _tripFareProfileName;
-    final stateText = meter.requiresManualResume
-        ? 'Tạm ngắt'
-        : status == MeterStatus.running ? 'Đang chạy'
-        : status == MeterStatus.paused ? 'Tạm dừng'
-        : status == MeterStatus.finished ? 'Hoàn tất' : 'Chờ khách';
     return InkWell(
       key: const Key('fare-profile-selector'),
       onTap: _showTariffSelector,
-      borderRadius: BorderRadius.circular(15),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: active ? const Color(0xFF202023)
-              : const Color(0xFF118BFB),
-          borderRadius: BorderRadius.circular(15),
-        ),
+      borderRadius: BorderRadius.circular(17),
+      child: DriverProPanel(
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
         child: Row(children: [
-          const Icon(Icons.local_taxi,
-            color: Colors.white, size: 30),
-          const SizedBox(width: 12),
+          const Icon(Icons.local_taxi_rounded,
+            color: DriverProColors.amber, size: 25),
+          const SizedBox(width: 10),
           Expanded(child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label,
-                maxLines: 2, overflow: TextOverflow.ellipsis,
+              Text('Bảng giá: $label', maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  fontSize: 17, fontWeight: FontWeight.w800,
+                  fontSize: 14, fontWeight: FontWeight.w800,
                   color: Colors.white)),
-              if (!active && status == MeterStatus.idle)
-                Text('Mở cửa: ' + vnd(meter.tariff.baseFare),
-                  style: const TextStyle(color: Colors.white70)),
+              if (status == MeterStatus.idle)
+                Text('Mở cửa: ${vnd(meter.tariff.baseFare)}',
+                  style: const TextStyle(
+                    fontSize: 12, color: DriverProColors.muted)),
               if (active)
-                Text(stateText + '  •  ' +
-                  (meter.elapsedSeconds ~/ 60).toString() + ' phút',
-                  style: TextStyle(color: meter.requiresManualResume
-                    ? const Color(0xFFFFA332)
-                    : const Color(0xFF26C65A))),
+                Text('Đang áp dụng • Không đổi giá giữa chuyến',
+                  style: const TextStyle(
+                    fontSize: 11, color: DriverProColors.muted)),
               if (status == MeterStatus.finished)
-                const Text('Chuyến đã kết thúc',
-                  style: TextStyle(color: Colors.white70)),
+                const Text('Biểu giá đã chốt cho chuyến',
+                  style: TextStyle(
+                    fontSize: 11, color: DriverProColors.muted)),
             ],
           )),
-         ]),
+          const Icon(Icons.chevron_right,
+            color: DriverProColors.cyan, size: 23),
+        ]),
       ),
     );
   }
 
-  Widget _mainFareCard() => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-    decoration: BoxDecoration(
-      color: const Color(0xFF202023),
-      borderRadius: BorderRadius.circular(16)),
-    child: Column(children: [
-      const Text('Thành tiền', style: TextStyle(
-        color: Colors.white60, fontSize: 14)),
-      const SizedBox(height: 2),
-      FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Text(vnd(meter.totalFare),
-          key: const Key('live-fare-total'),
-          style: const TextStyle(
-            color: Color(0xFFFF4549),
-            fontSize: 40,
-            fontWeight: FontWeight.w900,
-            fontFeatures: [FontFeature.tabularFigures()],
-          )),
+  Widget _gpsStatusStrip(MeterStatus status) {
+    final active = status == MeterStatus.running ||
+        status == MeterStatus.paused;
+    final hasPosition = _mapLat != null && _mapLon != null;
+    final trusted = active
+        ? _trackingPolicy.hasRecentFix(DateTime.now()) && !meter.requiresManualResume
+        : hasPosition;
+    final label = trusted
+        ? (active ? 'GPS đang theo dõi chuyến' : 'Đã có vị trí GPS')
+        : _gpsStatus;
+    return Container(
+      key: const Key('driver-pro-gps-status'),
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+      decoration: BoxDecoration(
+        color: trusted ? const Color(0xFF073622)
+            : const Color(0xFF33260D),
+        border: Border.all(
+          color: trusted ? const Color(0xFF008E50)
+              : const Color(0xFF94661F)),
+        borderRadius: BorderRadius.circular(13),
       ),
-    ]),
+      child: Row(children: [
+        Icon(trusted ? Icons.satellite_alt_rounded
+            : Icons.gps_not_fixed_rounded,
+          color: trusted ? DriverProColors.green
+              : DriverProColors.amber, size: 18),
+        const SizedBox(width: 8),
+        Expanded(child: Text(label,
+          maxLines: 1, overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
+            color: trusted ? const Color(0xFFD2FFE2)
+                : const Color(0xFFFFDC92)))),
+        Icon(trusted ? Icons.signal_cellular_alt_rounded
+            : Icons.signal_cellular_off_rounded,
+          color: trusted ? DriverProColors.green
+              : DriverProColors.amber, size: 19),
+      ]),
+    );
+  }
+
+  Widget _tripMetrics(MeterStatus status) {
+    final active = status == MeterStatus.running ||
+        status == MeterStatus.paused || status == MeterStatus.finished;
+    final speed = status == MeterStatus.running ||
+        status == MeterStatus.paused
+            ? meter.speedKmh : _previewSpeedKmh;
+    return Row(children: [
+      Expanded(child: DriverProMetricCard(
+        label: 'Quãng đường',
+        value: '${meter.distanceKm.toStringAsFixed(active ? 1 : 2)} km',
+        icon: Icons.route_rounded)),
+      const SizedBox(width: 7),
+      if (active) ...[
+        Expanded(child: DriverProMetricCard(
+          label: 'Thời gian',
+          value: '${meter.elapsedSeconds ~/ 60} phút',
+          icon: Icons.access_time_rounded)),
+        const SizedBox(width: 7),
+        Expanded(child: DriverProMetricCard(
+          label: 'Chờ tính phí',
+          value: '${meter.waitingSeconds ~/ 60} phút',
+          icon: Icons.local_taxi_rounded)),
+      ] else
+        Expanded(child: DriverProMetricCard(
+          label: 'Tốc độ GPS',
+          value: '${speed.toStringAsFixed(1)} km/h',
+          icon: Icons.speed_rounded)),
+    ]);
+  }
+
+  Widget _mainFareCard() => DriverProFareCard(
+    amount: vnd(meter.totalFare), status: meter.status);
+
+  Widget _botQuickAction() => InkWell(
+    key: const Key('driver-pro-bot-action'),
+    onTap: _customTollDialog,
+    borderRadius: BorderRadius.circular(14),
+    child: DriverProPanel(
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+      child: Row(children: [
+        const Icon(Icons.toll_outlined,
+          color: DriverProColors.cyan, size: 20),
+        const SizedBox(width: 9),
+        const Expanded(child: Text('Trạm thu phí (BOT)',
+          style: TextStyle(color: Colors.white,
+            fontSize: 13, fontWeight: FontWeight.w700))),
+        Text(vnd(meter.tollFee),
+          style: const TextStyle(color: Colors.white,
+            fontSize: 13, fontWeight: FontWeight.w800)),
+        const SizedBox(width: 5),
+        const Icon(Icons.chevron_right_rounded,
+          color: DriverProColors.cyan, size: 21),
+      ]),
+    ),
   );
+
+  Widget _primaryTripActions(MeterStatus status) {
+    final active = status == MeterStatus.running ||
+        status == MeterStatus.paused;
+    if (status == MeterStatus.idle) {
+      return Column(children: [
+        SizedBox(width: double.infinity,
+          child: DriverProAction(
+            label: 'Bắt đầu', icon: Icons.play_arrow_rounded,
+            color: DriverProColors.green, darkText: true,
+            onPressed: _storageReady ? _start : null)),
+        const SizedBox(height: 4),
+        TextButton.icon(
+          onPressed: _storageReady ? _flatFareDialog : null,
+          icon: const Icon(Icons.calculate_outlined, size: 17),
+          label: const Text('Báo giá chuyến đi / giá trọn gói'),
+        ),
+      ]);
+    }
+    if (active) {
+      return Row(children: [
+        Expanded(child: DriverProAction(
+          label: status == MeterStatus.paused
+              ? 'Tiếp tục' : 'Tạm dừng',
+          icon: status == MeterStatus.paused
+              ? Icons.play_arrow_rounded : Icons.pause_rounded,
+          color: DriverProColors.amber,
+          darkText: true,
+          onPressed: status == MeterStatus.paused
+              ? _resumeTrip
+              : () {
+                  setState(() => meter.pause());
+                  _checkpoint(force: true);
+                },
+        )),
+        const SizedBox(width: 9),
+        Expanded(child: DriverProAction(
+          label: 'Kết thúc',
+          icon: Icons.stop_rounded,
+          color: DriverProColors.red,
+          onPressed: _finish,
+        )),
+      ]);
+    }
+    return SizedBox(width: double.infinity, child: DriverProAction(
+      label: _pendingUnsaved == null
+          ? 'Chuyến mới' : 'THỬ LƯU LẠI CHUYẾN',
+      icon: _pendingUnsaved == null
+          ? Icons.restart_alt_rounded : Icons.save_rounded,
+      color: DriverProColors.green,
+      darkText: true,
+      onPressed: _pendingUnsaved == null
+        ? () {
+            setState(() {
+              meter.reset();
+              _routePoints.clear();
+              _routeSegment = 0;
+              _destinationController.clear();
+            });
+          }
+        : _saveCompletedRecord,
+    ));
+  }
 
   Future<void> _persistDashboardSettings(
       DashboardPreferences next) async {
