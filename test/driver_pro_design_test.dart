@@ -79,6 +79,39 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('status stays readable on narrow displays with large text',
+      (tester) async {
+    await tester.pumpWidget(shell(MediaQuery(
+      data: const MediaQueryData(textScaler: TextScaler.linear(2.3)),
+      child: const SizedBox(
+        width: 205,
+        child: DriverProStatusBanner(
+          status: MeterStatus.paused,
+          requiresManualResume: true),
+      ),
+    )));
+    expect(find.text('CHỜ TIẾP TỤC'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('quote action remains usable with large text on small screens',
+      (tester) async {
+    var taps = 0;
+    await tester.pumpWidget(shell(MediaQuery(
+      data: const MediaQueryData(textScaler: TextScaler.linear(2.0)),
+      child: SizedBox(
+        width: 235,
+        child: DriverProQuoteCard(onPressed: () => taps++),
+      ),
+    )));
+    expect(find.text('Báo giá chuyến đi'), findsOneWidget);
+    expect(find.text('Ước tính cước / giá trọn gói'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byKey(const Key('driver-pro-quote-card')));
+    expect(taps, 1);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Driver Pro action is a real tappable button',
       (tester) async {
     var count = 0;
