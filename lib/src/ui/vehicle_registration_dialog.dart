@@ -106,3 +106,4 @@ class _VehicleRegistrationDialogState extends State<VehicleRegistrationDialog> {
       ),
     ],
   );
+}
