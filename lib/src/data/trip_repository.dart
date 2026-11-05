@@ -8,14 +8,17 @@ import 'trip_session_snapshot.dart';
 
 /// Transactional storage for completed fares. Never use prefs for critical trips.
 class TripRepository {
-  TripRepository({Database? database}) : _database = database;
+  TripRepository({Database? database, String? databasePath})
+      : _database = database, _customDatabasePath = databasePath;
   Database? _database;
+  final String? _customDatabasePath;
 
   Future<Database> get _db async {
     if (_database != null) return _database!;
-    final root = await getDatabasesPath();
+    final databasePath = _customDatabasePath ??
+        path.join(await getDatabasesPath(), 'ttx_aataximeter_v1.db');
     _database = await openDatabase(
-      path.join(root, 'ttx_aataximeter_v1.db'), version: 3,
+      databasePath, version: 3,
       onCreate: (db, version) async {
         await db.execute('''CREATE TABLE trips (
           id TEXT PRIMARY KEY,
@@ -118,6 +121,11 @@ class TripRepository {
   Future<void> beginActive(TripSessionSnapshot snapshot) async {
     final db = await _db;
     await db.transaction((txn) async {
+      final existing = await txn.query('active_trip', columns: ['id'],
+        where: 'id = ?', whereArgs: [1], limit: 1);
+      if (existing.isNotEmpty) {
+        throw StateError('Không ghi đè chuyến chưa được lưu hoàn tất');
+      }
       await txn.delete('active_trip_route');
       await txn.insert('active_trip', {
         'id': 1,
