@@ -1825,17 +1825,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           const SizedBox(height: 9),
           if (status == MeterStatus.idle) ...[
             _selectedCompanyCard(status),
-            const SizedBox(height: 7),
-            _gpsStatusStrip(status),
-            const SizedBox(height: 9),
-            _mainFareCard(),
             const SizedBox(height: 8),
-            _tripMetrics(status),
-            const SizedBox(height: 5),
-            TextButton.icon(
-              onPressed: _storageReady ? _flatFareDialog : null,
-              icon: const Icon(Icons.calculate_outlined, size: 17),
-              label: const Text('Báo giá chuyến đi / giá trọn gói')),
+            DriverProQuoteCard(
+              onPressed: _storageReady ? _flatFareDialog : null),
           ] else if (active) ...[
             _mainFareCard(),
             const SizedBox(height: 8),
