@@ -5,12 +5,9 @@ import 'package:ttx_aataximeter/src/ui/led_marquee_title.dart';
 void main() {
   testWidgets('LED greeting moves right to left and stays mounted',
       (tester) async {
-    await tester.pumpWidget(const MaterialApp(
+    await tester.pumpWidget(MaterialApp(
       home: Scaffold(
-        appBar: PreferredSize(
-          preferredSize: Size.fromHeight(56),
-          child: AppBar(title: LedMarqueeTitle()),
-        ),
+        appBar: AppBar(title: const LedMarqueeTitle()),
       ),
     ));
     const message = 'Chúc quý khách thượng lộ bình an';
