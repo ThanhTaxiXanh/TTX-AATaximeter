@@ -218,7 +218,6 @@ class DriveMap3DState extends State<DriveMap3D> {
           : 'https://tiles.openfreemap.org/styles/liberty',
       initialCameraPosition: _camera(),
       compassEnabled: false,
-      attributionEnabled: true,
       logoEnabled: false,
       rotateGesturesEnabled: true,
       tiltGesturesEnabled: true,
