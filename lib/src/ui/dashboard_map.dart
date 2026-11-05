@@ -1,201 +1,305 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
-import '../domain/trip_route_point.dart';
+import 'package:flutter_map/flutter_map.dart' as fm;
+import 'package:latlong2/latlong.dart' as ll;
 
-/// Real, interactive OSM-based map in the phone dashboard.
-/// This is NOT a turn-by-turn navigator or a native Android Auto screen.
-/// Default camera is a Vietnam overview, never a presumed user location.
+import '../domain/trip_route_point.dart';
+import 'drive_map_3d.dart';
+
+/// Lightweight OSM 2D map by default; native MapLibre only mounts in 3D.
 class DashboardMap extends StatefulWidget {
   const DashboardMap({
-    super.key, required this.latitude, required this.longitude,
-    required this.onLocate, required this.speedKmh,
+    super.key,
+    required this.latitude,
+    required this.longitude,
+    required this.speedKmh,
     required this.speedLimitKmh,
+    required this.onLocate,
+    required this.is3D,
+    required this.dark,
+    required this.pitchDegrees,
+    required this.headingDegrees,
+    required this.onToggle3D,
+    required this.onToggleDark,
     this.routePoints = const [],
   });
   final double? latitude, longitude;
-  final VoidCallback onLocate;
-  final double speedKmh, speedLimitKmh;
+  final double speedKmh, speedLimitKmh, headingDegrees, pitchDegrees;
+  final bool is3D, dark;
+  final VoidCallback onLocate, onToggle3D, onToggleDark;
   final List<TripRoutePoint> routePoints;
+
   @override
   State<DashboardMap> createState() => _DashboardMapState();
 }
 
 class _DashboardMapState extends State<DashboardMap> {
-  final MapController controller = MapController();
-  bool mapReady = false;
-  bool follow = true;
+  final fm.MapController _map = fm.MapController();
+  final GlobalKey<DriveMap3DState> _driveKey = GlobalKey<DriveMap3DState>();
+  bool _ready = false, _follow = true;
 
-  bool get hasFix => widget.latitude != null &&
-      widget.longitude != null &&
-      widget.latitude!.abs() <= 90 && widget.longitude!.abs() <= 180;
+  bool get _hasFix {
+    final lat = widget.latitude, lon = widget.longitude;
+    return lat != null && lon != null &&
+        lat.isFinite && lon.isFinite &&
+        lat.abs() <= 90 && lon.abs() <= 180;
+  }
 
-  LatLng get position => LatLng(widget.latitude!, widget.longitude!);
+  ll.LatLng get _position => ll.LatLng(widget.latitude!, widget.longitude!);
 
   @override
   void didUpdateWidget(covariant DashboardMap old) {
     super.didUpdateWidget(old);
-    if (mapReady && follow && hasFix &&
-        (old.latitude != widget.latitude || old.longitude != widget.longitude)) {
+    if (old.is3D != widget.is3D) {
+      _ready = false;
+      _follow = true;
+    }
+    if (!widget.is3D && _ready && _follow && _hasFix &&
+        (old.latitude != widget.latitude ||
+         old.longitude != widget.longitude)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && mapReady && follow && hasFix) {
-          controller.move(position, controller.camera.zoom < 11
-              ? 15 : controller.camera.zoom);
+        if (mounted && _ready && _follow &&
+            !widget.is3D && _hasFix) {
+          _map.move(_position, _map.camera.zoom < 11 ? 15 : _map.camera.zoom);
         }
       });
     }
   }
 
-  void center() {
-    if (!hasFix) {
+  void _center() {
+    if (!_hasFix) {
       widget.onLocate();
       return;
     }
-    setState(() => follow = true);
-    if (mapReady) controller.move(position, 16);
+    if (widget.is3D) {
+      _driveKey.currentState?.centerOnCar();
+      return;
+    }
+    setState(() => _follow = true);
+    if (_ready) _map.move(_position, 16);
   }
 
-  void zoom(double offset) {
-    if (!mapReady) return;
-    final zoom = (controller.camera.zoom + offset).clamp(3.0, 19.0);
-    controller.move(controller.camera.center, zoom);
+  void _zoom(double amount) {
+    if (widget.is3D) {
+      _driveKey.currentState?.zoomBy(amount);
+      return;
+    }
+    if (!_ready) return;
+    _map.move(_map.camera.center,
+      (_map.camera.zoom + amount).clamp(3.0, 19.0).toDouble());
+  }
+
+  void _northUp() {
+    if (widget.is3D) {
+      _driveKey.currentState?.northUp();
+    } else if (_ready) {
+      _map.rotate(0);
+    }
   }
 
   @override
   void dispose() {
-    controller.dispose();
+    _map.dispose();
     super.dispose();
   }
 
-  List<Polyline> get routeLines {
-    final groups = <int, List<LatLng>>{};
+  List<fm.Polyline> get _routeLines {
+    final bySegment = <int, List<ll.LatLng>>{};
     for (final p in widget.routePoints) {
-      groups.putIfAbsent(p.segment, () => []).add(
-        LatLng(p.latitude, p.longitude));
+      bySegment.putIfAbsent(p.segment, () => []).add(
+        ll.LatLng(p.latitude, p.longitude));
     }
-    return groups.values.where((points) => points.length > 1)
-        .map((points) => Polyline(
+    return bySegment.values.where((points) => points.length > 1)
+        .map((points) => fm.Polyline(
           points: points, strokeWidth: 5,
-          color: const Color(0xFF07BFFF)))
-        .toList();
+          color: const Color(0xFF08B8F4))).toList();
+  }
+
+  Widget _twoD() => fm.FlutterMap(
+    mapController: _map,
+    options: fm.MapOptions(
+      initialCenter: _hasFix
+          ? _position : const ll.LatLng(16.0, 107.5),
+      initialZoom: _hasFix ? 15 : 5.2,
+      minZoom: 3, maxZoom: 19,
+      onMapReady: () {
+        _ready = true;
+        if (_hasFix && _follow) _map.move(_position, 15);
+      },
+      onPositionChanged: (camera, gesture) {
+        if (gesture && _follow && mounted) {
+          setState(() => _follow = false);
+        }
+      },
+    ),
+    children: [
+      ColorFiltered(
+        colorFilter: widget.dark
+            ? const ColorFilter.matrix([
+                -0.64, 0, 0, 0, 181,
+                0, -0.64, 0, 0, 182,
+                0, 0, -0.64, 0, 197,
+                0, 0, 0, 1, 0,
+              ])
+            : const ColorFilter.mode(Colors.transparent, BlendMode.dst),
+        child: fm.TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'vn.thanhtaxixanh.ttx_aataximeter',
+          maxNativeZoom: 19,
+        ),
+      ),
+      if (_routeLines.isNotEmpty) fm.PolylineLayer(polylines: _routeLines),
+      if (_hasFix) fm.MarkerLayer(markers: [
+        fm.Marker(
+          point: _position, width: 46, height: 46,
+          child: Container(
+            decoration: BoxDecoration(
+              color: const Color(0xCC071824),
+              shape: BoxShape.circle,
+              border: Border.all(color: const Color(0xFF00D8F0), width: 2)),
+            child: const Icon(Icons.navigation,
+              color: Color(0xFF00D8F0), size: 26),
+          ),
+        ),
+      ]),
+    ],
+  );
+
+  Widget _button(Widget child, VoidCallback tap, String hint) => Padding(
+    padding: const EdgeInsets.only(bottom: 5),
+    child: Material(
+      color: const Color(0xE91A2230),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: tap,
+        borderRadius: BorderRadius.circular(12),
+        child: Tooltip(
+          message: hint,
+          child: SizedBox(width: 42, height: 40,
+            child: Center(child: child)),
+        ),
+      ),
+    ),
+  );
+
+  Widget _speedPanel() {
+    final current = widget.speedKmh.isFinite
+        ? widget.speedKmh.clamp(0, 300).round() : 0;
+    final limit = widget.speedLimitKmh.isFinite &&
+            widget.speedLimitKmh > 0
+        ? widget.speedLimitKmh.round() : 0;
+    final overspeed = limit > 0 && current > limit;
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      Container(
+        width: 65, height: 65,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.white,
+          border: Border.all(color: const Color(0xFFE52B35), width: 7),
+          boxShadow: const [
+            BoxShadow(color: Color(0x55000000), blurRadius: 5),
+          ],
+        ),
+        child: Text(limit == 0 ? '—' : limit.toString(),
+          style: const TextStyle(color: Colors.black,
+            fontSize: 25, fontWeight: FontWeight.w900)),
+      ),
+      const SizedBox(height: 6),
+      Container(
+        width: 70, height: 70,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: widget.dark
+              ? const Color(0xDF303741) : const Color(0xEAF5F5F5),
+          border: Border.all(
+            color: overspeed ? Colors.redAccent : const Color(0xFF999DA4),
+            width: 3),
+        ),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.speed, color: Color(0xFFFAA435), size: 17),
+            Text(current.toString(), style: TextStyle(
+              color: overspeed ? Colors.redAccent
+                : (widget.dark ? Colors.white : Colors.black),
+              fontSize: 24, fontWeight: FontWeight.w900)),
+            Text('km/h', style: TextStyle(
+              color: widget.dark ? Colors.white70 : Colors.black54,
+              fontSize: 10)),
+          ],
+        ),
+      ),
+      if (overspeed)
+        const Text('QUÁ TỐC ĐỘ', style: TextStyle(
+          color: Colors.redAccent, fontSize: 9,
+          fontWeight: FontWeight.bold,
+          backgroundColor: Color(0xDF101010))),
+      const Text('Giới hạn cài đặt', style: TextStyle(
+        fontSize: 9, color: Colors.white,
+        backgroundColor: Color(0xCC121826))),
+    ]);
   }
 
   @override
   Widget build(BuildContext context) => ClipRRect(
     borderRadius: BorderRadius.circular(17),
-    child: SizedBox(height: 335, child: Stack(children: [
-      FlutterMap(
-        mapController: controller,
-        options: MapOptions(
-          initialCenter: hasFix
-              ? position : const LatLng(16.0, 107.5),
-          initialZoom: hasFix ? 15 : 5.2,
-          minZoom: 3, maxZoom: 19,
-          onMapReady: () {
-            mapReady = true;
-            if (hasFix && follow) controller.move(position, 15);
-          },
-          onPositionChanged: (camera, gesture) {
-            if (gesture && follow && mounted) {
-              setState(() => follow = false);
-            }
-          },
+    child: SizedBox(
+      height: 335,
+      child: Stack(children: [
+        Positioned.fill(child: widget.is3D
+          ? DriveMap3D(
+              key: _driveKey,
+              latitude: widget.latitude,
+              longitude: widget.longitude,
+              headingDegrees: widget.headingDegrees,
+              pitchDegrees: widget.pitchDegrees,
+              dark: widget.dark,
+              routePoints: widget.routePoints,
+            )
+          : _twoD(),
         ),
-        children: [
-          TileLayer(
-            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            userAgentPackageName: 'vn.thanhtaxixanh.ttx_aataximeter',
-            maxNativeZoom: 19,
-          ),
-          if (routeLines.isNotEmpty)
-            PolylineLayer(polylines: routeLines),
-          if (hasFix)
-            MarkerLayer(markers: [
-              Marker(
-                point: position, width: 44, height: 44,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: const Color(0xCC071824),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: const Color(0xFF00D8F0),
-                      width: 2)),
-                  child: const Icon(Icons.navigation,
-                    color: Color(0xFF00D8F0), size: 26),
-                ),
-              ),
-            ]),
-        ],
-      ),
-      Positioned(top: 8, left: 8,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: const Color(0xE5080C18),
-            borderRadius: BorderRadius.circular(10)),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              const Icon(Icons.map_outlined, size: 17,
-                color: Color(0xFF00D8F0)),
-              const SizedBox(width: 5),
-              Text(hasFix ? 'BẢN ĐỒ / VỊ TRÍ GPS' : 'BẢN ĐỒ / CHỜ VỊ TRÍ',
+        Positioned(top: 8, left: 8,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: const Color(0xD908101A),
+              borderRadius: BorderRadius.circular(10)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+              child: Text(widget.is3D ? '3D • GÓC NHÌN SAU XE'
+                  : (_hasFix ? '2D • VỊ TRÍ GPS' : '2D • CHỜ GPS'),
                 style: const TextStyle(
-                  fontWeight: FontWeight.bold, fontSize: 11)),
-            ]),
+                  color: Colors.white, fontSize: 10,
+                  fontWeight: FontWeight.bold)),
+            ),
           )),
-      ),
-      Positioned(right: 8, top: 8,
-        child: Column(children: [
-          _control(Icons.my_location, center, 'Về vị trí xe'),
-          const SizedBox(height: 6),
-          _control(Icons.add, () => zoom(1), 'Phóng to'),
-          const SizedBox(height: 6),
-          _control(Icons.remove, () => zoom(-1), 'Thu nhỏ'),
-          const SizedBox(height: 6),
-          _control(Icons.explore_outlined,
-            () { if (mapReady) controller.rotate(0); },
-            'Trở về hướng Bắc'),
-        ]),
-      ),
-      Positioned(bottom: 8, left: 8,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: const Color(0xEB10131D),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFF303543)),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min, children: [
-                Text(widget.speedKmh.round().toString() + ' km/h',
-                  style: const TextStyle(
-                    color: Color(0xFFFF4549), fontSize: 20,
-                    fontWeight: FontWeight.w900)),
-                Text('Giới hạn cài đặt: ' +
-                    widget.speedLimitKmh.round().toString() + ' km/h',
-                  style: const TextStyle(
-                    color: Colors.white70, fontSize: 9)),
-              ]),
-          ),
+        Positioned(right: 7, top: 7,
+          child: Column(children: [
+            _button(Text(widget.is3D ? '2D' : '3D',
+              style: const TextStyle(color: Colors.cyanAccent,
+                fontWeight: FontWeight.w900)), widget.onToggle3D,
+              widget.is3D ? 'Chuyển sang 2D' : 'Chuyển sang 3D'),
+            _button(Icon(widget.dark ? Icons.dark_mode : Icons.light_mode,
+                color: Colors.amberAccent, size: 23),
+              widget.onToggleDark,
+              widget.dark ? 'Chuyển bản đồ sáng' : 'Chuyển bản đồ tối'),
+            _button(const Icon(Icons.explore_outlined,
+                color: Colors.cyanAccent, size: 22),
+              _northUp, 'Đưa bản đồ về hướng Bắc'),
+            _button(const Icon(Icons.my_location,
+                color: Colors.cyanAccent, size: 23),
+              _center, 'Về vị trí xe'),
+            _button(const Icon(Icons.add, color: Colors.cyanAccent),
+              () => _zoom(1), 'Phóng to'),
+            _button(const Icon(Icons.remove, color: Colors.cyanAccent),
+              () => _zoom(-1), 'Thu nhỏ'),
+          ]),
         ),
-      ),
-      Positioned(bottom: 5, right: 7,
-        child: Container(
-          color: const Color(0xDEFFFFFF),
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          child: const Text('© OpenStreetMap contributors',
-            style: TextStyle(fontSize: 10, color: Colors.black)),
-        )),
-    ])),
+        Positioned(left: 8, bottom: 8, child: _speedPanel()),
+        if (!widget.is3D)
+          const Positioned(right: 5, bottom: 3,
+            child: Text('© OpenStreetMap contributors',
+              style: TextStyle(fontSize: 9, color: Colors.black87,
+                backgroundColor: Color(0xCCFFFFFF)))),
+      ]),
+    ),
   );
-
-  Widget _control(IconData icon, VoidCallback tap, String title) =>
-      Material(
-        color: const Color(0xEC111829),
-        borderRadius: BorderRadius.circular(9),
-        child: IconButton(
-          icon: Icon(icon, color: const Color(0xFF00D8F0)),
-          iconSize: 21, visualDensity: VisualDensity.compact,
-          tooltip: title, onPressed: tap),
-      );
 }
