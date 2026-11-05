@@ -28,6 +28,8 @@ import 'src/ui/tariff_catalog_page.dart';
 import 'src/ui/tariff_settings_dialog.dart';
 import 'src/ui/dashboard_map.dart';
 import 'src/ui/led_marquee_title.dart';
+import 'src/ui/dashboard_preferences_dialog.dart';
+import 'src/domain/dashboard_preferences.dart';
 import 'src/platform/car_state_bridge.dart';
 import 'src/domain/vehicle_registration.dart';
 import 'src/ui/vehicle_registration_dialog.dart';
@@ -85,6 +87,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   TariffCatalog _tariffCatalog = TariffCatalog.initial();
   double? _mapLat;
   double? _mapLon;
+  double _headingDegrees = 0;
+  DashboardPreferences _dashboardPrefs = const DashboardPreferences();
+  bool _is3D = false;
+  String? _startupError;
   final List<TripRoutePoint> _routePoints = [];
   int _routeSegment = 0;
   bool _storageReady = false;
@@ -126,6 +132,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
 
   Future<void> _initializeData() async {
     try {
+      final dashboardFuture = store.getString(
+        DashboardPreferences.storageKey).catchError((Object _) => null);
       await repository.initializeAndMigrate(legacyPreferences: store);
       final encodedBank = await store.getString('ttx_vietqr_account_v1');
       VietQrAccount? account;
@@ -191,8 +199,22 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         _destinationController.text = restored.dropoff;
         _gpsStatus = 'Chuyến cũ đã được tạm ngắt an toàn';
       }
+      DashboardPreferences dashboardPrefs = const DashboardPreferences();
+      try {
+        final preferences = await dashboardFuture;
+        if (preferences != null) {
+          dashboardPrefs = DashboardPreferences.decode(preferences);
+        }
+      } catch (_) {
+        // A bad presentation preference must never block fare recovery.
+      }
       if (!mounted) return;
       setState(() {
+        _dashboardPrefs = dashboardPrefs;
+        // Recovered trips are paused for safety, never auto-start 3D.
+        _is3D = meter.status == MeterStatus.paused
+            ? false : dashboardPrefs.default3D;
+        _startupError = null;
         _bankBook = bankBook;
         _vehicle = registration;
         _tariffCatalog = catalog;
@@ -209,6 +231,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       });
     } catch (error) {
       if (!mounted) return;
+      setState(() => _startupError = error.toString());
       _notify('Lỗi khởi tạo lịch sử SQLite: ' + error.toString());
     }
   }
@@ -544,7 +567,11 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         setState(() {
           _mapLat = position.latitude;
           _mapLon = position.longitude;
-          _gpsStatus = 'GPS nền ±' +
+          if (position.heading.isFinite && position.heading >= 0 &&
+              position.heading <= 360 && position.speed > 1.5) {
+            _headingDegrees = position.heading;
+          }
+          _gpsStatus = 'GPS nền ±'
               position.accuracy.toStringAsFixed(0) + ' m';
         });
         // Also advance on each valid fix: Android may throttle Dart timers
@@ -661,7 +688,13 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       _trackingPolicy.clear();
       return;
     }
-    if (mounted) await _enableGps();
+    if (mounted) {
+      await _enableGps();
+      if (mounted && meter.status == MeterStatus.running &&
+          _dashboardPrefs.auto3DOnStart) {
+        setState(() => _is3D = true);
+      }
+    }
   }
 
   Future<void> _resumeTrip() async {
@@ -676,6 +709,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     _trackingPolicy.begin(now);
     _checkpoint(force: true);
     if (_gps == null) await _enableGps();
+    if (mounted && meter.status == MeterStatus.running &&
+        _dashboardPrefs.auto3DOnStart) {
+      setState(() => _is3D = true);
+    }
   }
 
   Future<void> _finish() async {
@@ -692,7 +729,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       fareProfileName: _tripFareProfileName,
       tariffSnapshot: meter.tariff,
       routePoints: _routePoints);
-    setState(() => _pendingUnsaved = record);
+    setState(() {
+      _is3D = false; // End-of-trip map always returns to overhead 2D.
+      _pendingUnsaved = record;
+    });
     await _saveCompletedRecord();
   }
 
@@ -721,6 +761,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           _tripPickup = '';
           _tripDropoff = '';
           _carPreview = false;
+          _is3D = false;
           _destinationController.clear();
         });
         await CarStateBridge.publish(meter);
@@ -764,7 +805,13 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       _trackingPolicy.clear();
       return;
     }
-    if (mounted) await _enableGps();
+    if (mounted) {
+      await _enableGps();
+      if (mounted && meter.status == MeterStatus.running &&
+          _dashboardPrefs.auto3DOnStart) {
+        setState(() => _is3D = true);
+      }
+    }
   }
 
   Future<void> _customTollDialog() async {
@@ -1240,6 +1287,73 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     ]),
   );
 
+  Future<void> _persistDashboardSettings(
+      DashboardPreferences next) async {
+    try {
+      await store.setString(DashboardPreferences.storageKey, next.encode());
+    } catch (error) {
+      if (mounted) _notify('Không lưu được cài đặt giao diện: ' + error.toString());
+    }
+  }
+
+  void _toggleMap3D() {
+    final next = !_is3D;
+    final settings = _dashboardPrefs.copyWith(default3D: next);
+    setState(() {
+      _is3D = next;
+      _dashboardPrefs = settings;
+    });
+    unawaited(_persistDashboardSettings(settings));
+  }
+
+  void _toggleMapDark() {
+    final settings = _dashboardPrefs.copyWith(darkMap: !_dashboardPrefs.darkMap);
+    setState(() => _dashboardPrefs = settings);
+    unawaited(_persistDashboardSettings(settings));
+  }
+
+  Future<void> _editDashboardPreferences() async {
+    if (!mounted) return;
+    final chosen = await showDialog<DashboardPreferences>(
+      context: context,
+      builder: (dialogContext) => DashboardPreferencesDialog(
+        initial: _dashboardPrefs,
+      ),
+    );
+    if (chosen == null || !mounted) return;
+    setState(() {
+      _dashboardPrefs = chosen;
+      if (meter.status == MeterStatus.idle) _is3D = chosen.default3D;
+    });
+    await _persistDashboardSettings(chosen);
+  }
+
+  Future<void> _settingsMenu() async {
+    final item = await showModalBottomSheet<String>(
+      context: context, showDragHandle: true,
+      builder: (context) => SafeArea(child: Wrap(children: [
+        ListTile(leading: const Icon(Icons.price_change_outlined),
+          title: const Text('Quản lý bảng giá cước'),
+          onTap: () => Navigator.pop(context, 'tariff')),
+        ListTile(leading: const Icon(Icons.map_outlined),
+          title: const Text('Bản đồ 2D / 3D và lời chào'),
+          onTap: () => Navigator.pop(context, 'dashboard')),
+        ListTile(leading: const Icon(Icons.directions_car_outlined),
+          title: const Text('Hãng xe và biển số'),
+          onTap: () => Navigator.pop(context, 'vehicle')),
+      ])),
+    );
+    if (!mounted) return;
+    switch (item) {
+      case 'tariff':
+        await _tariffDialog();
+      case 'dashboard':
+        await _editDashboardPreferences();
+      case 'vehicle':
+        await _configureVehicle();
+    }
+  }
+
   void _showTools(String choice) {
     switch (choice) {
       case 'vehicle':
@@ -1263,6 +1377,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       case 'locationPermission':
         _explainAlwaysLocation();
         return;
+      case 'dashboardSettings':
+        _editDashboardPreferences();
+        return;
       default:
         return;
     }
@@ -1279,12 +1396,16 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       backgroundColor: const Color(0xFF09090A),
       appBar: AppBar(
         backgroundColor: const Color(0xFF080809),
-        title: const LedMarqueeTitle(),
+        title: LedMarqueeTitle(
+          key: ValueKey(status == MeterStatus.finished),
+          message: status == MeterStatus.finished
+              ? _dashboardPrefs.thanks : _dashboardPrefs.welcome,
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings_outlined),
-            tooltip: 'Quản lý bảng giá cước',
-            onPressed: _tariffDialog,
+            tooltip: 'Cài đặt ứng dụng',
+            onPressed: _settingsMenu,
           ),
           PopupMenuButton<String>(
             tooltip: 'Tiện ích và cấu hình',
@@ -1304,6 +1425,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                 child: Text('Nhập phí BOT')),
               PopupMenuItem(value: 'locationPermission',
                 child: Text('Quyền định vị “Luôn cho phép”')),
+              PopupMenuItem(value: 'dashboardSettings',
+                child: Text('Bản đồ 2D / 3D và lời chào')),
             ],
             icon: const Icon(Icons.more_vert),
           ),
@@ -1312,13 +1435,39 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       body: SafeArea(child: ListView(
         padding: const EdgeInsets.fromLTRB(12, 7, 12, 20),
         children: [
-          DashboardMap(
-            latitude: _mapLat, longitude: _mapLon,
-            routePoints: _routePoints,
-            speedKmh: meter.speedKmh,
-            speedLimitKmh: meter.tariff.speedLimitKmh,
-            onLocate: _locateOnMap,
-          ),
+          if (!_storageReady)
+            Container(height: 335,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: const Color(0xFF111821),
+                borderRadius: BorderRadius.circular(17)),
+              child: _startupError == null
+                  ? const Column(mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(), SizedBox(height: 14),
+                        Text('Đang tải dữ liệu chuyến đi...'),
+                      ])
+                  : Column(mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text('Không tải được dữ liệu chuyến đi'),
+                        TextButton(onPressed: _initializeData,
+                          child: const Text('Thử lại')),
+                      ]),
+            )
+          else
+            DashboardMap(
+              latitude: _mapLat, longitude: _mapLon,
+              routePoints: _routePoints,
+              speedKmh: meter.speedKmh,
+              speedLimitKmh: meter.tariff.speedLimitKmh,
+              headingDegrees: _headingDegrees,
+              pitchDegrees: _dashboardPrefs.renderedPitch,
+              is3D: _is3D,
+              dark: _dashboardPrefs.darkMap,
+              onToggle3D: _toggleMap3D,
+              onToggleDark: _toggleMapDark,
+              onLocate: _locateOnMap,
+            ),
           const SizedBox(height: 9),
           _selectedCompanyCard(status),
           const SizedBox(height: 10),
@@ -1378,7 +1527,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFFFF4247),
                     foregroundColor: Colors.white),
-                  child: const Text('Dừng lại',
+                  child: const Text('Kết thúc',
                     style: TextStyle(fontWeight: FontWeight.bold)),
                 ))),
             ]),
