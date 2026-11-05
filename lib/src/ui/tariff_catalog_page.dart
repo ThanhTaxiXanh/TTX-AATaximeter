@@ -51,13 +51,6 @@ class _SwipeTariffCardState extends State<_SwipeTariffCard> {
     clipBehavior: Clip.hardEdge,
     color: const Color(0xFF111829),
     child: LayoutBuilder(builder: (context, size) => Stack(children: [
-      Positioned(top: 0, bottom: 0, right: 0,
-        child: SizedBox(width: 144, child: Row(children: [
-          _action('Sửa', Icons.edit_outlined,
-            const Color(0xFF226CB8), widget.onEdit),
-          _action('Xóa', Icons.delete_outline,
-            const Color(0xFFC43E44), widget.onDelete),
-        ]))),
       GestureDetector(
         behavior: HitTestBehavior.opaque,
         onHorizontalDragStart: (_) => _dragDistance = 0,
@@ -102,6 +95,16 @@ class _SwipeTariffCardState extends State<_SwipeTariffCard> {
           ),
         ),
       ),
+      // Render actions above the translated front tile so hit testing
+      // remains reliable on narrow Android screens.
+      if (_revealed)
+        Positioned(top: 0, bottom: 0, right: 0,
+          child: SizedBox(width: 144, child: Row(children: [
+            _action('Sửa', Icons.edit_outlined,
+              const Color(0xFF226CB8), widget.onEdit),
+            _action('Xóa', Icons.delete_outline,
+              const Color(0xFFC43E44), widget.onDelete),
+          ]))),
     ])),
   );
 }
