@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
@@ -6,6 +7,7 @@ import '../domain/trip_route_point.dart';
 import 'drive_map_3d.dart';
 import 'follow_camera_gate.dart';
 import 'raster_tile_failover.dart';
+import 'driver_pro_design.dart';
 
 /// Lightweight OSM 2D map by default; native MapLibre only mounts in 3D.
 class DashboardMap extends StatefulWidget {
@@ -23,10 +25,12 @@ class DashboardMap extends StatefulWidget {
     required this.onToggle3D,
     required this.onToggleDark,
     this.routePoints = const [],
+    this.height = 335,
   });
   final double? latitude, longitude;
   final double speedKmh, speedLimitKmh, headingDegrees, pitchDegrees;
   final bool is3D, dark;
+  final double height;
   final VoidCallback onLocate, onToggle3D, onToggleDark;
   final List<TripRoutePoint> routePoints;
 
@@ -232,8 +236,12 @@ class _DashboardMapState extends State<DashboardMap> {
               color: const Color(0xCC071824),
               shape: BoxShape.circle,
               border: Border.all(color: const Color(0xFF00D8F0), width: 2)),
-            child: const Icon(Icons.navigation,
-              color: Color(0xFF00D8F0), size: 26),
+            child: Transform.rotate(
+              angle: (widget.headingDegrees.isFinite
+                  ? widget.headingDegrees : 0) * math.pi / 180,
+              child: const Icon(Icons.navigation_rounded,
+                color: DriverProColors.cyan, size: 27)),
+
           ),
         ),
       ]),
@@ -242,10 +250,12 @@ class _DashboardMapState extends State<DashboardMap> {
   }
 
   Widget _button(Widget child, VoidCallback tap, String hint) => Padding(
-    padding: const EdgeInsets.only(bottom: 5),
+    padding: const EdgeInsets.only(bottom: 6),
     child: Material(
-      color: const Color(0xE91A2230),
-      borderRadius: BorderRadius.circular(12),
+      color: const Color(0xF20A1B2F),
+      shape: RoundedRectangleBorder(
+        side: const BorderSide(color: DriverProColors.border, width: 1),
+        borderRadius: BorderRadius.circular(12)),
       child: InkWell(
         onTap: tap,
         borderRadius: BorderRadius.circular(12),
@@ -258,6 +268,23 @@ class _DashboardMapState extends State<DashboardMap> {
     ),
   );
 
+  Widget _mapModeOption(String label, bool selected) => InkWell(
+    onTap: selected ? null : widget.onToggle3D,
+    borderRadius: BorderRadius.circular(10),
+    child: Container(
+      width: 40, height: 31,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: selected ? DriverProColors.blue
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(9)),
+      child: Text(label, style: TextStyle(
+        fontWeight: FontWeight.w900,
+        color: selected ? Colors.white : DriverProColors.muted,
+        fontSize: 13)),
+    ),
+  );
+
   Widget _speedPanel() {
     final current = widget.speedKmh.isFinite
         ? widget.speedKmh.clamp(0, 300).round() : 0;
@@ -267,41 +294,41 @@ class _DashboardMapState extends State<DashboardMap> {
     final overspeed = limit > 0 && current > limit;
     return Column(mainAxisSize: MainAxisSize.min, children: [
       Container(
-        width: 65, height: 65,
+        width: 60, height: 60,
         alignment: Alignment.center,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: Colors.white,
-          border: Border.all(color: const Color(0xFFE52B35), width: 7),
+          border: Border.all(color: const Color(0xFFE52B35), width: 6),
           boxShadow: const [
             BoxShadow(color: Color(0x55000000), blurRadius: 5),
           ],
         ),
         child: Text(limit == 0 ? '—' : limit.toString(),
           style: const TextStyle(color: Colors.black,
-            fontSize: 25, fontWeight: FontWeight.w900)),
+            fontSize: 24, fontWeight: FontWeight.w900)),
       ),
       const SizedBox(height: 6),
       Container(
-        width: 70, height: 70,
+        width: 65, height: 65,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: widget.dark
-              ? const Color(0xDF303741) : const Color(0xEAF5F5F5),
+          color: const Color(0xED06101E),
           border: Border.all(
-            color: overspeed ? Colors.redAccent : const Color(0xFF999DA4),
-            width: 3),
+            color: overspeed ? DriverProColors.red
+                : DriverProColors.cyan, width: 3),
+          boxShadow: const [BoxShadow(
+            color: Color(0x66000000), blurRadius: 8)],
         ),
         child: Column(mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.speed, color: Color(0xFFFAA435), size: 17),
             Text(current.toString(), style: TextStyle(
-              color: overspeed ? Colors.redAccent
-                : (widget.dark ? Colors.white : Colors.black),
-              fontSize: 24, fontWeight: FontWeight.w900)),
-            Text('km/h', style: TextStyle(
-              color: widget.dark ? Colors.white70 : Colors.black54,
-              fontSize: 10)),
+              color: overspeed ? DriverProColors.red : Colors.white,
+              fontSize: 26, height: 1.0,
+              fontWeight: FontWeight.w900,
+              fontFeatures: const [FontFeature.tabularFigures()])),
+            const Text('km/h', style: TextStyle(
+              color: DriverProColors.muted, fontSize: 10)),
           ],
         ),
       ),
@@ -318,9 +345,9 @@ class _DashboardMapState extends State<DashboardMap> {
 
   @override
   Widget build(BuildContext context) => ClipRRect(
-    borderRadius: BorderRadius.circular(17),
+    borderRadius: BorderRadius.circular(18),
     child: SizedBox(
-      height: 335,
+      height: widget.height,
       child: Stack(children: [
         Positioned.fill(child: (widget.is3D || _vector2DFallback)
           ? DriveMap3D(
@@ -338,59 +365,66 @@ class _DashboardMapState extends State<DashboardMap> {
         Positioned(top: 8, left: 8,
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: const Color(0xD908101A),
-              borderRadius: BorderRadius.circular(10)),
+              color: const Color(0xEE06101F),
+              border: Border.all(color: DriverProColors.border),
+              borderRadius: BorderRadius.circular(9)),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
-              child: Text(widget.is3D ? '3D • GÓC NHÌN SAU XE'
-                  : (_vector2DFallback ? '2D • OPENFREEMAP'
-                    : (_hasFix ? '2D • VỊ TRÍ GPS' : '2D • CHỜ GPS')),
-                style: const TextStyle(
-                  color: Colors.white, fontSize: 10,
-                  fontWeight: FontWeight.bold)),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 8, vertical: 7),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(_hasFix ? Icons.gps_fixed_rounded
+                    : Icons.gps_not_fixed_rounded,
+                  size: 13, color: _hasFix
+                      ? DriverProColors.green : DriverProColors.amber),
+                const SizedBox(width: 4),
+                Text(_hasFix ? (widget.is3D ? 'GPS • 3D'
+                    : (_vector2DFallback ? 'GPS • VECTOR'
+                    : 'VỊ TRÍ GPS')) : 'CHỜ GPS',
+                  style: const TextStyle(
+                    color: Colors.white, fontSize: 10,
+                    fontWeight: FontWeight.w800)),
+              ]),
             ),
           )),
-        if (!widget.is3D)
-          Positioned(left: 8, top: 45,
-            child: Material(
-              color: const Color(0xDF10202E),
-              borderRadius: BorderRadius.circular(8),
-              child: InkWell(
-                onTap: _select2DBaseMap,
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(_vector2DFallback ? Icons.refresh : Icons.layers,
-                      color: Colors.cyanAccent, size: 15),
-                    const SizedBox(width: 4),
-                    Text(_vector2DFallback ? 'Thử lại OSM' : 'Đổi nền 2D',
-                      style: const TextStyle(
-                        color: Colors.white, fontSize: 10)),
-                  ]),
-                ),
-              ),
+        Positioned(top: 7, right: 7,
+          child: Material(
+            color: const Color(0xF1081425),
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.all(3),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                _mapModeOption('2D', !widget.is3D),
+                _mapModeOption('3D', widget.is3D),
+              ]),
             ),
           ),
-        Positioned(right: 7, top: 7,
+        ),
+        Positioned(right: 7, top: 48,
           child: Column(children: [
-            _button(Text(widget.is3D ? '2D' : '3D',
-              style: const TextStyle(color: Colors.cyanAccent,
-                fontWeight: FontWeight.w900)), widget.onToggle3D,
-              widget.is3D ? 'Chuyển sang 2D' : 'Chuyển sang 3D'),
-            _button(Icon(widget.dark ? Icons.dark_mode : Icons.light_mode,
-                color: Colors.amberAccent, size: 23),
+            if (!widget.is3D)
+              _button(Icon(_vector2DFallback
+                  ? Icons.refresh_rounded : Icons.layers_outlined,
+                  color: DriverProColors.cyan, size: 22),
+                _select2DBaseMap,
+                _vector2DFallback ? 'Thử lại nền OSM'
+                    : 'Đổi nền 2D sang OpenFreeMap'),
+            _button(Icon(widget.dark
+                  ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+                color: DriverProColors.amber, size: 22),
               widget.onToggleDark,
-              widget.dark ? 'Chuyển bản đồ sáng' : 'Chuyển bản đồ tối'),
+              widget.dark ? 'Chuyển bản đồ sáng'
+                  : 'Chuyển bản đồ tối'),
             _button(const Icon(Icons.explore_outlined,
-                color: Colors.cyanAccent, size: 22),
+                color: DriverProColors.cyan, size: 21),
               _northUp, 'Đưa bản đồ về hướng Bắc'),
-            _button(const Icon(Icons.my_location,
-                color: Colors.cyanAccent, size: 23),
+            _button(const Icon(Icons.my_location_rounded,
+                color: DriverProColors.cyan, size: 21),
               _center, 'Về vị trí xe'),
-            _button(const Icon(Icons.add, color: Colors.cyanAccent),
+            _button(const Icon(Icons.add_rounded,
+                color: DriverProColors.cyan, size: 22),
               () => _zoom(1), 'Phóng to'),
-            _button(const Icon(Icons.remove, color: Colors.cyanAccent),
+            _button(const Icon(Icons.remove_rounded,
+                color: DriverProColors.cyan, size: 22),
               () => _zoom(-1), 'Thu nhỏ'),
           ]),
         ),
