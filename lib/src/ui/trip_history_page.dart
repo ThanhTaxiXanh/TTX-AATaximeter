@@ -5,9 +5,10 @@ import '../domain/trip_record.dart';
 import '../payment/bank_book.dart';
 import 'trip_detail_page.dart';
 import 'trip_receipt_dialog.dart';
+import 'driver_pro_design.dart';
 
 String _cash(num value) => value.round().toString()
-  .replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',') + ' đ';
+  .replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => '.') + ' đ';
 
 class TripHistoryPage extends StatefulWidget {
   const TripHistoryPage({
@@ -91,8 +92,9 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
 
   Widget _periodPicker() => Container(
     decoration: BoxDecoration(
-      color: const Color(0xFF202023),
-      borderRadius: BorderRadius.circular(22),
+      color: DriverProColors.panel,
+      border: Border.all(color: DriverProColors.border),
+      borderRadius: BorderRadius.circular(16),
     ),
     padding: const EdgeInsets.all(3),
     child: Row(children: [
@@ -105,8 +107,8 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
             padding: const EdgeInsets.symmetric(vertical: 11),
             decoration: BoxDecoration(
               color: _period == period
-                  ? const Color(0xFF5B5B61) : Colors.transparent,
-              borderRadius: BorderRadius.circular(20),
+                  ? DriverProColors.blue : Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
             ),
             child: Text(
               switch (period) {
@@ -129,7 +131,8 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
         height: 94,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
         decoration: BoxDecoration(
-          color: const Color(0xFF202023),
+          color: DriverProColors.panel,
+          border: Border.all(color: DriverProColors.border),
           borderRadius: BorderRadius.circular(16),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start,
@@ -158,7 +161,8 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF202023),
+        color: DriverProColors.panel,
+        border: Border.all(color: DriverProColors.border),
         borderRadius: BorderRadius.circular(14),
       ),
       child: InkWell(
@@ -173,7 +177,7 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
           padding: const EdgeInsets.fromLTRB(14, 15, 8, 15),
           child: Row(children: [
             const Icon(Icons.local_taxi,
-              size: 37, color: Color(0xFF168FFF)),
+              size: 37, color: DriverProColors.cyan),
             const SizedBox(width: 12),
             Expanded(child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -191,7 +195,7 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
             const SizedBox(width: 6),
             Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
               Text(_cash(r.totalFare), style: const TextStyle(
-                color: Color(0xFF29CF63), fontSize: 17,
+                color: DriverProColors.green, fontSize: 17,
                 fontWeight: FontWeight.w800)),
               const SizedBox(height: 5),
               Text(r.distanceKm.toStringAsFixed(1) + ' km • ' +
@@ -220,9 +224,9 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
     final report = RevenueSummary.calculate(
       _trips, period: _period, now: DateTime.now());
     return Scaffold(
-      backgroundColor: const Color(0xFF090909),
+      backgroundColor: DriverProColors.background,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF090909),
+        backgroundColor: DriverProColors.backgroundDeep,
         centerTitle: true,
         title: const Text('Doanh thu',
           style: TextStyle(fontWeight: FontWeight.w800)),
@@ -285,7 +289,7 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
         ),
       bottomNavigationBar: SafeArea(top: false, child: NavigationBar(
         height: 68,
-        backgroundColor: const Color(0xFF202023),
+        backgroundColor: DriverProColors.backgroundDeep,
         selectedIndex: 1,
         onDestinationSelected: (value) {
           if (value == 0) Navigator.pop(context);
@@ -294,7 +298,7 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
           NavigationDestination(
             icon: Icon(Icons.speed_outlined), label: 'Đồng hồ cước'),
           NavigationDestination(
-            icon: Icon(Icons.bar_chart, color: Color(0xFF168FFF)),
+            icon: Icon(Icons.bar_chart, color: DriverProColors.cyan),
             label: 'Doanh thu'),
         ],
       )),
