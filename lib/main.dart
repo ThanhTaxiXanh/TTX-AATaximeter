@@ -1717,19 +1717,25 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     final active = status == MeterStatus.running ||
         status == MeterStatus.paused;
     if (_carPreview) return _buildCarMode();
+    final mapHeight = (MediaQuery.sizeOf(context).height * 0.405)
+        .clamp(280.0, 410.0).toDouble();
 
     return Scaffold(
-      backgroundColor: const Color(0xFF09090A),
+      backgroundColor: DriverProColors.background,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF080809),
-        title: LedMarqueeTitle(
-          key: ValueKey(status == MeterStatus.finished),
-          message: status == MeterStatus.finished
-              ? _dashboardPrefs.thanks : _dashboardPrefs.welcome,
+        toolbarHeight: 56,
+        backgroundColor: DriverProColors.backgroundDeep,
+        leading: IconButton(
+          icon: const Icon(Icons.menu_rounded, size: 24),
+          tooltip: 'Menu cài đặt và bảng giá',
+          onPressed: _settingsMenu,
         ),
+        titleSpacing: 2,
+        centerTitle: true,
+        title: const DriverProBrand(),
         actions: [
           IconButton(
-            icon: const Icon(Icons.settings_outlined),
+            icon: const Icon(Icons.settings_outlined, size: 23),
             tooltip: 'Cài đặt ứng dụng',
             onPressed: _settingsMenu,
           ),
@@ -1754,206 +1760,194 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
               PopupMenuItem(value: 'dashboardSettings',
                 child: Text('Bản đồ 2D / 3D và lời chào')),
             ],
-            icon: const Icon(Icons.more_vert),
+            icon: const Icon(Icons.more_vert_rounded, size: 21),
           ),
         ],
       ),
       body: SafeArea(child: ListView(
-        padding: const EdgeInsets.fromLTRB(12, 7, 12, 20),
+        key: const Key('driver-pro-dashboard'),
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(11, 6, 11, 20),
         children: [
+          Center(child: DriverProStatusBanner(
+            status: status,
+            requiresManualResume: meter.requiresManualResume)),
+          const SizedBox(height: 1),
+          Center(child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 320),
+            child: LedMarqueeTitle(
+              compact: true,
+              key: ValueKey('greeting-${status == MeterStatus.finished}'),
+              message: status == MeterStatus.finished
+                  ? _dashboardPrefs.thanks : _dashboardPrefs.welcome),
+          )),
+          const SizedBox(height: 8),
           if (!_storageReady)
-            Container(height: 335,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: const Color(0xFF111821),
-                borderRadius: BorderRadius.circular(17)),
-              child: _startupError == null
-                  ? const Column(mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        CircularProgressIndicator(), SizedBox(height: 14),
-                        Text('Đang tải dữ liệu chuyến đi...'),
-                      ])
-                  : Column(mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Text('Không tải được dữ liệu chuyến đi'),
-                        TextButton(onPressed: _initializeData,
-                          child: const Text('Thử lại')),
-                      ]),
+            DriverProPanel(
+              child: SizedBox(
+                height: mapHeight - 24,
+                child: Center(child: _startupError == null
+                    ? const Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(
+                            color: DriverProColors.cyan),
+                          SizedBox(height: 12),
+                          Text('Đang tải dữ liệu chuyến đi...'),
+                        ],
+                      )
+                    : Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text('Không tải được dữ liệu chuyến đi'),
+                          TextButton(
+                            onPressed: _initializeData,
+                            child: const Text('Thử lại')),
+                        ],
+                      )),
+              ),
             )
           else
-            DashboardMap(
-              latitude: _mapLat, longitude: _mapLon,
-              routePoints: active ? _routePoints : const [],
-              speedKmh: active ? meter.speedKmh : _previewSpeedKmh,
-              speedLimitKmh: meter.tariff.speedLimitKmh,
-              headingDegrees: _headingDegrees,
-              pitchDegrees: _dashboardPrefs.renderedPitch,
-              is3D: _is3D,
-              dark: _dashboardPrefs.darkMap,
-              onToggle3D: _toggleMap3D,
-              onToggleDark: _toggleMapDark,
-              onLocate: _locateOnMap,
-            ),
-          const SizedBox(height: 9),
-          _selectedCompanyCard(status),
-          const SizedBox(height: 10),
-          _mainFareCard(),
-          const SizedBox(height: 10),
-          Row(children: [
-            Expanded(child: _metricTile(
-              label: 'Quãng đường',
-              value: meter.distanceKm.toStringAsFixed(2) + ' km',
-              icon: Icons.route)),
-            Expanded(child: _metricTile(
-              label: 'Tốc độ',
-              value: (active ? meter.speedKmh : _previewSpeedKmh)
-                  .toStringAsFixed(1) + ' km/h',
-              icon: Icons.speed)),
-          ]),
-          const SizedBox(height: 11),
-          if (status == MeterStatus.idle)
-            Column(children: [
-              SizedBox(width: double.infinity, height: 58,
-                child: FilledButton(
-                  onPressed: _storageReady ? _start : null,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF22C953),
-                    foregroundColor: Colors.white),
-                  child: const Text('Bắt đầu',
-                    style: TextStyle(fontSize: 19,
-                      fontWeight: FontWeight.w800)),
-                )),
-              TextButton.icon(
-                onPressed: _storageReady ? _flatFareDialog : null,
-                icon: const Icon(Icons.calculate_outlined),
-                label: const Text('Báo giá chuyến đi / giá trọn gói')),
-            ]),
-          if (active) ...[
-            Row(children: [
-              Expanded(child: SizedBox(height: 58,
-                child: FilledButton.icon(
-                  onPressed: status == MeterStatus.paused
-                      ? _resumeTrip
-                      : () {
-                          setState(() => meter.pause());
-                          _checkpoint(force: true);
-                        },
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF982A),
-                    foregroundColor: Colors.white),
-                  icon: Icon(status == MeterStatus.paused
-                      ? Icons.play_arrow : Icons.pause),
-                  label: Text(status == MeterStatus.paused
-                      ? 'Tiếp tục' : 'Tạm dừng',
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
-                ))),
-              const SizedBox(width: 10),
-              Expanded(child: SizedBox(height: 58,
-                child: FilledButton(
-                  onPressed: _finish,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF4247),
-                    foregroundColor: Colors.white),
-                  child: const Text('Kết thúc',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                ))),
-            ]),
-            Padding(
-              padding: const EdgeInsets.only(top: 7),
-              child: SizedBox(width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: _customTollDialog,
-                  icon: const Icon(Icons.toll),
-                  label: const Text('Nhập phí BOT'),
-                ),
+            Container(
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: const Color(0xFF17577B), width: 1.3),
+                borderRadius: BorderRadius.circular(19),
+                boxShadow: const [BoxShadow(
+                  color: Color(0x2700C9EF), blurRadius: 15)]),
+              child: DashboardMap(
+                height: mapHeight,
+                latitude: _mapLat, longitude: _mapLon,
+                routePoints: active ? _routePoints : const [],
+                speedKmh: active ? meter.speedKmh : _previewSpeedKmh,
+                speedLimitKmh: meter.tariff.speedLimitKmh,
+                headingDegrees: _headingDegrees,
+                pitchDegrees: _dashboardPrefs.renderedPitch,
+                is3D: _is3D,
+                dark: _dashboardPrefs.darkMap,
+                onToggle3D: _toggleMap3D,
+                onToggleDark: _toggleMapDark,
+                onLocate: _locateOnMap,
               ),
             ),
+          const SizedBox(height: 9),
+          if (status == MeterStatus.idle) ...[
+            _selectedCompanyCard(status),
+            const SizedBox(height: 7),
+            _gpsStatusStrip(status),
+            const SizedBox(height: 9),
+            _mainFareCard(),
+            const SizedBox(height: 8),
+            _tripMetrics(status),
+            const SizedBox(height: 10),
+            _primaryTripActions(status),
+          ] else if (active) ...[
+            _mainFareCard(),
+            const SizedBox(height: 8),
+            _tripMetrics(status),
+            const SizedBox(height: 7),
+            _botQuickAction(),
+            const SizedBox(height: 11),
+            _primaryTripActions(status),
+            const SizedBox(height: 9),
+            _gpsStatusStrip(status),
+            const SizedBox(height: 8),
+            DriverProPanel(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: ExpansionTile(
+                iconColor: DriverProColors.cyan,
+                collapsedIconColor: DriverProColors.cyan,
+                title: const Text('Chi tiết tính tiền',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800, fontSize: 14)),
+                leading: const Icon(Icons.receipt_long_outlined,
+                  color: DriverProColors.cyan, size: 21),
+                childrenPadding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
+                children: [
+                  FareBreakdownSection(
+                    tariff: meter.tariff,
+                    distanceKm: meter.distanceKm,
+                    tripStarted: true,
+                    showReachedOnly: true,
+                    totalFare: meter.totalFare,
+                    isFlatFare: meter.flatFare != null,
+                    waitingFare: meter.waitingFare,
+                    tollFee: meter.tollFee,
+                    surcharge: meter.surcharge,
+                    discount: meter.discount,
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            _mainFareCard(),
+            const SizedBox(height: 8),
+            _tripMetrics(status),
+            const SizedBox(height: 7),
+            _selectedCompanyCard(status),
+            const SizedBox(height: 10),
+            _primaryTripActions(status),
           ],
-          if (status == MeterStatus.finished)
-            SizedBox(width: double.infinity, height: 54,
-              child: FilledButton.icon(
-                onPressed: _pendingUnsaved == null
-                  ? () {
-                      setState(() {
-                        meter.reset();
-                        _routePoints.clear();
-                        _routeSegment = 0;
-                        _destinationController.clear();
-                      });
-                    }
-                  : _saveCompletedRecord,
-                icon: Icon(_pendingUnsaved == null
-                  ? Icons.restart_alt : Icons.save),
-                label: Text(_pendingUnsaved == null
-                  ? 'Chuyến mới' : 'THỬ LƯU LẠI CHUYẾN'),
-              )),
           if (meter.requiresManualResume)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 7),
+              padding: EdgeInsets.symmetric(vertical: 8),
               child: Text('Chuyến đã tạm ngắt an toàn. '
                 'Chỉ tiếp tục khi GPS đã sẵn sàng.',
-                style: TextStyle(color: Color(0xFFFFA332))),
-            ),
+                style: TextStyle(
+                  color: DriverProColors.amber, fontSize: 12))),
           if (active && !_trackingPolicy.hasTrustedFix &&
               !meter.requiresManualResume)
-            const Text('Đang xác định GPS; chưa cộng cước chờ khi mất tín hiệu.',
-              style: TextStyle(fontSize: 12, color: Colors.orangeAccent)),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 7),
+              child: Text(
+                'Đang xác định GPS; không tính cước cho lúc mất tín hiệu.',
+                style: TextStyle(
+                  fontSize: 12, color: DriverProColors.amber)),
+            ),
           if (_checkpointError != null)
-            ListTile(
-              title: const Text('Lỗi lưu trạng thái chuyến',
-                style: TextStyle(color: Colors.redAccent)),
-              subtitle: Text(_checkpointError!,
-                maxLines: 2, overflow: TextOverflow.ellipsis),
-              trailing: IconButton(
-                onPressed: () => setState(() {
-                  _checkpointError = null;
-                  _checkpoint(force: true);
-                }),
-                icon: const Icon(Icons.refresh)),
+            DriverProPanel(
+              borderColor: DriverProColors.red,
+              child: ListTile(
+                title: const Text('Lỗi lưu trạng thái chuyến',
+                  style: TextStyle(color: DriverProColors.red)),
+                subtitle: Text(_checkpointError!,
+                  maxLines: 2, overflow: TextOverflow.ellipsis),
+                trailing: IconButton(
+                  onPressed: () => setState(() {
+                    _checkpointError = null;
+                    _checkpoint(force: true);
+                  }),
+                  icon: const Icon(Icons.refresh)),
+              ),
             ),
-          if (active) ...[
-            const SizedBox(height: 12),
-            const Text('Chi tiết tính tiền',
-              style: TextStyle(fontSize: 18,
-                fontWeight: FontWeight.w800, color: Colors.white)),
-            const SizedBox(height: 8),
-            FareBreakdownSection(
-              tariff: meter.tariff,
-              distanceKm: meter.distanceKm,
-              tripStarted: true,
-              showReachedOnly: true,
-              totalFare: meter.totalFare,
-              isFlatFare: meter.flatFare != null,
-              waitingFare: meter.waitingFare,
-              tollFee: meter.tollFee,
-              surcharge: meter.surcharge,
-              discount: meter.discount,
-            ),
-          ],
-          const SizedBox(height: 6),
+          const SizedBox(height: 10),
           const Center(child: Text(
             'Phiên bản thử nghiệm • Chưa sử dụng thu cước thương mại',
-            style: TextStyle(color: Colors.white38, fontSize: 10))),
+            style: TextStyle(
+              color: DriverProColors.muted, fontSize: 10))),
         ],
       )),
       bottomNavigationBar: SafeArea(
         top: false,
         child: NavigationBar(
-          height: 68,
-          backgroundColor: const Color(0xFF202023),
-          indicatorColor: const Color(0xFF101014),
+          height: 66,
+          backgroundColor: DriverProColors.backgroundDeep,
+          indicatorColor: const Color(0xFF123A53),
           selectedIndex: 0,
           onDestinationSelected: (index) {
             if (index == 1) _showHistory();
           },
           destinations: const [
             NavigationDestination(
-              icon: Icon(Icons.speed_outlined),
-              selectedIcon: Icon(Icons.speed, color: Color(0xFF168FFF)),
+              icon: Icon(Icons.speed_outlined,
+                color: DriverProColors.muted),
+              selectedIcon: Icon(Icons.speed_rounded,
+                color: DriverProColors.cyan),
               label: 'Đồng hồ cước',
             ),
             NavigationDestination(
-              icon: Icon(Icons.bar_chart_rounded),
+              icon: Icon(Icons.bar_chart_rounded,
+                color: DriverProColors.muted),
               label: 'Doanh thu',
             ),
           ],
