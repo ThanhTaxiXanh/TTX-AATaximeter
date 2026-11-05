@@ -13,6 +13,7 @@ class TariffCodec {
     'longDistancePerKmRate': t.longDistancePerKmRate,
     'waitingFeePerHour': t.waitingFeePerHour,
     'waitingSpeedThresholdKmh': t.waitingSpeedThresholdKmh,
+    'waitingGraceMinutes': t.waitingGraceMinutes,
     'speedLimitKmh': t.speedLimitKmh,
     'gpsMaxAccuracyMeters': t.gpsMaxAccuracyMeters,
     'gpsCalibrationMultiplier': t.gpsCalibrationMultiplier,
@@ -41,6 +42,8 @@ class TariffCodec {
           value('waitingFeePerHour', original.waitingFeePerHour),
       waitingSpeedThresholdKmh:
           value('waitingSpeedThresholdKmh', original.waitingSpeedThresholdKmh),
+      waitingGraceMinutes:
+          value('waitingGraceMinutes', original.waitingGraceMinutes),
       speedLimitKmh: value('speedLimitKmh', original.speedLimitKmh),
       gpsMaxAccuracyMeters:
           value('gpsMaxAccuracyMeters', original.gpsMaxAccuracyMeters),
