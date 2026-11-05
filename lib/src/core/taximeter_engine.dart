@@ -28,6 +28,7 @@ class TariffConfig {
     required this.longDistancePerKmRate,
     required this.waitingFeePerHour,
     this.waitingSpeedThresholdKmh = 5,
+    this.waitingGraceMinutes = 5,
     this.speedLimitKmh = 80,
     this.gpsMaxAccuracyMeters = 30,
     this.gpsCalibrationMultiplier = 1,
@@ -59,6 +60,8 @@ class TariffConfig {
   final double longDistancePerKmRate;
   final double waitingFeePerHour;
   final double waitingSpeedThresholdKmh;
+  /// Unbilled minutes at the start of each continuous low-speed stop.
+  final double waitingGraceMinutes;
   final double speedLimitKmh;
   final double gpsMaxAccuracyMeters;
   final double gpsCalibrationMultiplier;
@@ -70,10 +73,13 @@ class TariffConfig {
     final values = [
       baseFare, baseDistanceKm, perKmRate, longDistanceThresholdKm,
       longDistancePerKmRate, waitingFeePerHour, waitingSpeedThresholdKmh,
-      speedLimitKmh, gpsMaxAccuracyMeters, gpsCalibrationMultiplier,
+      waitingGraceMinutes, speedLimitKmh, gpsMaxAccuracyMeters, gpsCalibrationMultiplier,
     ];
     if (values.any((v) => !v.isFinite || v < 0)) {
       throw ArgumentError('Đơn giá hoặc cấu hình không hợp lệ');
+    }
+    if (waitingGraceMinutes > 180) {
+      throw ArgumentError('Ngưỡng chờ tối đa 180 phút');
     }
     if (longDistanceThresholdKm < baseDistanceKm ||
         gpsMaxAccuracyMeters == 0 || gpsCalibrationMultiplier == 0) {
@@ -137,7 +143,7 @@ class TariffConfig {
     double? baseFare, double? baseDistanceKm, double? perKmRate,
     double? longDistanceThresholdKm, double? longDistancePerKmRate,
     double? waitingFeePerHour, double? waitingSpeedThresholdKmh,
-    double? speedLimitKmh, double? gpsMaxAccuracyMeters,
+    double? waitingGraceMinutes, double? speedLimitKmh, double? gpsMaxAccuracyMeters,
     double? gpsCalibrationMultiplier, bool? roundToThousands, String? name,
     List<FareTier>? fareTiers,
   }) => TariffConfig(
@@ -151,6 +157,7 @@ class TariffConfig {
         waitingFeePerHour: waitingFeePerHour ?? this.waitingFeePerHour,
         waitingSpeedThresholdKmh:
             waitingSpeedThresholdKmh ?? this.waitingSpeedThresholdKmh,
+        waitingGraceMinutes: waitingGraceMinutes ?? this.waitingGraceMinutes,
         speedLimitKmh: speedLimitKmh ?? this.speedLimitKmh,
         gpsMaxAccuracyMeters: gpsMaxAccuracyMeters ?? this.gpsMaxAccuracyMeters,
         gpsCalibrationMultiplier:
@@ -234,6 +241,7 @@ class TaximeterEngine {
   double distanceMeters = 0;
   int elapsedSeconds = 0;
   int waitingSeconds = 0;
+  int _consecutiveWaitSeconds = 0;
   double speedKmh = 0;
   double maxSpeedKmh = 0;
   double tollFee = 0;
@@ -266,6 +274,7 @@ class TaximeterEngine {
     _lastFix = null;
     flatFare = fixedFare;
     _interrupted = false;
+    _consecutiveWaitSeconds = 0;
     status = MeterStatus.running;
   }
 
@@ -284,7 +293,14 @@ class TaximeterEngine {
     elapsedSeconds += wholeSeconds;
     if (status == MeterStatus.paused ||
         speedKmh < _tariff.waitingSpeedThresholdKmh) {
-      waitingSeconds += wholeSeconds;
+      final before = _consecutiveWaitSeconds;
+      _consecutiveWaitSeconds += wholeSeconds;
+      final grace = (_tariff.waitingGraceMinutes * 60).ceil();
+      waitingSeconds += math.max(0, _consecutiveWaitSeconds - grace) -
+          math.max(0, before - grace);
+    } else {
+      // A moving car starts a fresh waiting window on the next stop.
+      _consecutiveWaitSeconds = 0;
     }
   }
 
@@ -302,6 +318,7 @@ class TaximeterEngine {
     _lastTick = now;
     status = MeterStatus.running;
     _lastFix = null; // New baseline: do not invent distance during the gap.
+    _consecutiveWaitSeconds = 0;
     speedKmh = 0;
   }
 
@@ -313,6 +330,7 @@ class TaximeterEngine {
     final now = at ?? DateTime.now();
     if (!_interrupted) tick(now);
     _interrupted = true;
+    _consecutiveWaitSeconds = 0;
     status = MeterStatus.paused;
     speedKmh = 0;
     _lastFix = null;
@@ -444,6 +462,7 @@ class TaximeterEngine {
     if (_lastTick == null || at.isBefore(_lastTick!)) return;
     _lastTick = at;
     _lastFix = null;
+    _consecutiveWaitSeconds = 0;
     speedKmh = 0;
   }
 
@@ -521,6 +540,7 @@ class TaximeterEngine {
     distanceMeters = 0;
     elapsedSeconds = 0;
     waitingSeconds = 0;
+    _consecutiveWaitSeconds = 0;
     speedKmh = 0;
     maxSpeedKmh = 0;
     tollFee = 0;
