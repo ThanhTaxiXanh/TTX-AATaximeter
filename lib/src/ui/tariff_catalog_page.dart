@@ -74,7 +74,7 @@ class _SwipeTariffCardState extends State<_SwipeTariffCard> {
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOutCubic,
           offset: Offset(_revealed ? -144 / size.maxWidth : 0, 0),
-          child: ColoredBox(
+          child: Material(
             color: widget.selected
                 ? const Color(0xFF363019) : const Color(0xFF111829),
             child: ListTile(
@@ -236,7 +236,8 @@ class _TariffCatalogPageState extends State<TariffCatalogPage> {
         icon: const Icon(Icons.add),
         label: const Text('THÊM HÃNG / BIỂU GIÁ')),
       const SizedBox(height: 12),
-      const Text('Taxi Hương Giang chưa có bảng giá mặc định. '
+      if (catalog.find('huong_giang')?.configured == false)
+        const Text('Taxi Hương Giang chưa có bảng giá mặc định. '
         'Hãy nhập giá mở cửa, các mốc km và đơn giá theo thông tin '
         'được xác nhận trước khi chọn.',
         style: TextStyle(fontSize: 12, color: Colors.orangeAccent)),
