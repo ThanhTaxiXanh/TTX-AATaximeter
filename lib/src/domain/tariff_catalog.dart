@@ -108,6 +108,27 @@ class TariffCatalog {
     return catalog;
   }
 
+  /// Remove a saved profile without touching receipts or historical fares.
+  /// If the current profile is removed, choose another configured profile.
+  TariffCatalog remove(String id) {
+    if (find(id) == null) throw StateError('Không tìm thấy bảng giá');
+    final next = profiles.where((p) => p.id != id).toList();
+    if (next.isEmpty) {
+      throw StateError('Cần giữ ít nhất một bảng giá đang sử dụng');
+    }
+    var selected = activeId;
+    if (selected == id) {
+      final replacement = next.where((p) => p.configured);
+      if (replacement.isEmpty) {
+        throw StateError('Hãy tạo bảng giá hợp lệ khác trước khi xóa bảng giá đang dùng');
+      }
+      selected = replacement.first.id;
+    }
+    final updated = TariffCatalog(profiles: next, activeId: selected);
+    updated.validate();
+    return updated;
+  }
+
   TariffCatalog activate(String id) {
     final chosen = find(id);
     if (chosen?.configured != true) {
