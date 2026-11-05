@@ -111,6 +111,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   final TextEditingController _destinationController = TextEditingController();
   Timer? _ticker;
   StreamSubscription<Position>? _gps;
+  StreamSubscription<Position>? _previewGps;
+  double _previewSpeedKmh = 0;
   final LocationTrackingPolicy _trackingPolicy = LocationTrackingPolicy();
   bool _gpsStarting = false;
   bool _appVisible = true;
@@ -124,6 +126,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initializeData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_startPreviewGps());
+    });
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       _meterTick(DateTime.now());
@@ -220,7 +225,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         _tariffCatalog = catalog;
         _storageReady = true;
       });
-      await CarStateBridge.publish(meter);
+      if (meter.status != MeterStatus.idle) await _stopPreviewGps();
+      unawaited(CarStateBridge.publish(meter));
       // Request location at first launch; automatically center the map.
       // Registration comes later so two dialogs never overlap.
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -241,6 +247,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
     _gps?.cancel();
+    _previewGps?.cancel();
     repository.dispose();
     _destinationController.dispose();
     super.dispose();
@@ -291,7 +298,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       final permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.always ||
           permission == LocationPermission.whileInUse) {
-        await _refreshMapLocation();
+        unawaited(_startPreviewGps());
         if (mounted && _appVisible &&
             permission != LocationPermission.always) {
           final askedBackground =
@@ -341,6 +348,84 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     );
     if (go == true && mounted) {
       await Geolocator.openAppSettings();
+    }
+  }
+
+  /// Map GPS preview is foreground-only and never calculates fare or route.
+  Future<void> _startPreviewGps() async {
+    if (!mounted || !_appVisible || _previewGps != null || _gps != null ||
+        (meter.status != MeterStatus.idle &&
+         meter.status != MeterStatus.finished)) return;
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) return;
+      final permission = await Geolocator.checkPermission();
+      if (permission != LocationPermission.always &&
+          permission != LocationPermission.whileInUse) return;
+      if (!mounted || !_appVisible || _previewGps != null || _gps != null ||
+          (meter.status != MeterStatus.idle &&
+           meter.status != MeterStatus.finished)) return;
+      final settings = defaultTargetPlatform == TargetPlatform.android
+          ? AndroidSettings(
+              accuracy: LocationAccuracy.high,
+              intervalDuration: const Duration(seconds: 2),
+              distanceFilter: 2)
+          : const LocationSettings(
+              accuracy: LocationAccuracy.high, distanceFilter: 2);
+      _previewGps = Geolocator.getPositionStream(
+        locationSettings: settings).listen(_onPreviewFix,
+          onError: (Object error) {
+            _previewGps = null;
+            if (mounted && _appVisible) {
+              setState(() => _gpsStatus = 'GPS bản đồ: ' + error.toString());
+            }
+          },
+          onDone: () => _previewGps = null);
+      final cached = await Geolocator.getLastKnownPosition();
+      if (cached != null && mounted && _previewGps != null &&
+          _mapLat == null) _onPreviewFix(cached, cached: true);
+    } catch (error) {
+      if (mounted && _appVisible) {
+        setState(() => _gpsStatus =
+            'Lỗi GPS bản đồ: ' + error.toString());
+      }
+    }
+  }
+
+  void _onPreviewFix(Position p, {bool cached = false}) {
+    if (!mounted || !_appVisible || _gps != null ||
+        (meter.status != MeterStatus.idle &&
+         meter.status != MeterStatus.finished)) return;
+    if (!p.latitude.isFinite || !p.longitude.isFinite ||
+        p.latitude.abs() > 90 || p.longitude.abs() > 180 ||
+        !p.accuracy.isFinite || p.accuracy < 0 ||
+        p.accuracy > 150) return;
+    final age = DateTime.now().difference(p.timestamp);
+    if (age.isNegative && age.abs() > const Duration(seconds: 5)) return;
+    if (age > (cached
+        ? const Duration(minutes: 3)
+        : const Duration(seconds: 20))) return;
+    setState(() {
+      _mapLat = p.latitude;
+      _mapLon = p.longitude;
+      _previewSpeedKmh = p.speed.isFinite && p.speed > 0
+          ? (p.speed * 3.6).clamp(0.0, 300.0).toDouble() : 0;
+      if (p.heading.isFinite && p.heading >= 0 &&
+          p.heading <= 360 && p.speed > 1.5) _headingDegrees = p.heading;
+      _gpsStatus = 'GPS xem bản đồ ±' +
+          p.accuracy.round().toString() + ' m';
+    });
+  }
+
+  Future<void> _stopPreviewGps() async {
+    final previous = _previewGps;
+    _previewGps = null;
+    _previewSpeedKmh = 0;
+    if (previous != null) {
+      try {
+        await previous.cancel();
+      } catch (_) {
+        // Preview failure must not affect taximeter accounting.
+      }
     }
   }
 
@@ -599,10 +684,14 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         state != AppLifecycleState.paused &&
         state != AppLifecycleState.detached;
     if (state == AppLifecycleState.resumed) {
-      // Returning from Android app settings or switching apps auto-refocuses.
-      unawaited(_refreshMapLocation());
+      if (meter.status == MeterStatus.idle ||
+          meter.status == MeterStatus.finished) {
+        unawaited(_startPreviewGps());
+      }
       return;
     }
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) unawaited(_stopPreviewGps());
     if (state != AppLifecycleState.hidden &&
         state != AppLifecycleState.paused) return;
     if (meter.status != MeterStatus.running &&
@@ -689,7 +778,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       return;
     }
     if (mounted) {
-      await _enableGps();
+      await _stopPreviewGps();
+      if (mounted) await _enableGps();
       if (mounted && meter.status == MeterStatus.running &&
           _dashboardPrefs.auto3DOnStart) {
         setState(() => _is3D = true);
@@ -708,7 +798,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     });
     _trackingPolicy.begin(now);
     _checkpoint(force: true);
-    if (_gps == null) await _enableGps();
+    if (_gps == null) {
+      await _stopPreviewGps();
+      if (mounted) await _enableGps();
+    }
     if (mounted && meter.status == MeterStatus.running &&
         _dashboardPrefs.auto3DOnStart) {
       setState(() => _is3D = true);
@@ -719,7 +812,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     if (meter.status != MeterStatus.running &&
         meter.status != MeterStatus.paused) return;
     final finished = meter.finish();
-    unawaited(_stopGps());
+    await _stopGps();
     final record = TripRecord.fromReceipt(
       finished,
       pickup: _tripPickup, dropoff: _tripDropoff,
@@ -734,6 +827,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       _pendingUnsaved = record;
     });
     await _saveCompletedRecord();
+    if (mounted && _appVisible) unawaited(_startPreviewGps());
   }
 
   Future<void> _saveCompletedRecord() async {
@@ -764,6 +858,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           _is3D = false;
           _destinationController.clear();
         });
+        if (mounted && _appVisible) unawaited(_startPreviewGps());
         await CarStateBridge.publish(meter);
       }
     } catch (error) {
@@ -806,7 +901,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       return;
     }
     if (mounted) {
-      await _enableGps();
+      await _stopPreviewGps();
+      if (mounted) await _enableGps();
       if (mounted && meter.status == MeterStatus.running &&
           _dashboardPrefs.auto3DOnStart) {
         setState(() => _is3D = true);
@@ -1099,7 +1195,13 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
 
   Future<void> _locateOnMap() async {
     if (!await _requestLocationReady()) return;
-    await _refreshMapLocation();
+    if (!mounted) return;
+    if (meter.status == MeterStatus.idle ||
+        meter.status == MeterStatus.finished) {
+      await _startPreviewGps();
+    } else if (_gps == null) {
+      await _refreshMapLocation();
+    }
   }
 
   void _showHistory() {
@@ -1457,8 +1559,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           else
             DashboardMap(
               latitude: _mapLat, longitude: _mapLon,
-              routePoints: _routePoints,
-              speedKmh: meter.speedKmh,
+              routePoints: active ? _routePoints : const [],
+              speedKmh: active ? meter.speedKmh : _previewSpeedKmh,
               speedLimitKmh: meter.tariff.speedLimitKmh,
               headingDegrees: _headingDegrees,
               pitchDegrees: _dashboardPrefs.renderedPitch,
@@ -1480,7 +1582,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
               icon: Icons.route)),
             Expanded(child: _metricTile(
               label: 'Tốc độ',
-              value: meter.speedKmh.toStringAsFixed(1) + ' km/h',
+              value: (active ? meter.speedKmh : _previewSpeedKmh)
+                  .toStringAsFixed(1) + ' km/h',
               icon: Icons.speed)),
           ]),
           const SizedBox(height: 11),
