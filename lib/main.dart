@@ -23,6 +23,7 @@ import 'src/ui/trip_history_page.dart';
 import 'src/ui/trip_receipt_dialog.dart';
 import 'src/data/tariff_codec.dart';
 import 'src/data/trip_session_snapshot.dart';
+import 'src/data/async_trip_checkpoint.dart';
 import 'src/domain/tariff_catalog.dart';
 import 'src/ui/tariff_catalog_page.dart';
 import 'src/ui/tariff_settings_dialog.dart';
@@ -789,14 +790,17 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     }
   }
 
-  String _sessionPayload() => TripSessionSnapshot.fromEngine(
+  TripSessionSnapshot _sessionSnapshot() =>
+      TripSessionSnapshot.fromEngine(
     meter, pickup: _tripPickup, dropoff: _tripDropoff,
     vehicleType: _tripVehicleType,
     vehiclePlate: _tripVehiclePlate,
     vehicleBrand: _tripVehicleBrand,
     fareProfileName: _tripFareProfileName,
     routePoints: _routePoints,
-  ).encode();
+  );
+
+  String _sessionPayload() => _sessionSnapshot().encode();
 
   /// Freeze vehicle and fare profile at trip start.
   void _captureTripMetadata() {
@@ -814,8 +818,11 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     final now = DateTime.now();
     if (!force && now.difference(_lastCheckpoint).inSeconds < 3) return;
     _lastCheckpoint = now;
-    final data = _sessionPayload(); // immutable snapshot at this instant
+    // Freeze the entire payload at this instant. For long trips the large
+    // route JSON is encoded off the UI isolate without changing its format.
+    final snapshot = _sessionSnapshot();
     _writeQueue = _writeQueue.then((_) async {
+      final data = await encodeTripCheckpoint(snapshot);
       await repository.saveActive(data);
       await CarStateBridge.publish(meter);
     }).catchError((Object error) {
