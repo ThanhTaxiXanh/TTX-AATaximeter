@@ -414,14 +414,19 @@ class TaximeterEngine {
     return restored;
   }
 
+  /// Validate the physical GPS sample *before* modifying any trip state.
+  /// In particular, an inaccurate fix must not reset a GPS-gap baseline.
+  bool isValidGpsObservation(GpsFix fix) =>
+      fix.latitude.isFinite && fix.longitude.isFinite &&
+      fix.latitude.abs() <= 90 && fix.longitude.abs() <= 180 &&
+      fix.accuracyMeters.isFinite && fix.accuracyMeters >= 0 &&
+      fix.accuracyMeters <= _tariff.gpsMaxAccuracyMeters &&
+      fix.speedKmh.isFinite && fix.speedKmh >= 0;
+
   /// Returns true only for valid telemetry actually accepted by the meter.
   /// A rejected outlier must not refresh the UI's GPS freshness watchdog.
   bool acceptGps(GpsFix fix) {
-    if (!fix.latitude.isFinite || !fix.longitude.isFinite ||
-        fix.latitude.abs() > 90 || fix.longitude.abs() > 180 ||
-        !fix.accuracyMeters.isFinite || fix.accuracyMeters < 0 ||
-        fix.accuracyMeters > _tariff.gpsMaxAccuracyMeters ||
-        !fix.speedKmh.isFinite || fix.speedKmh < 0) return false;
+    if (!isValidGpsObservation(fix)) return false;
 
     if (status != MeterStatus.running) {
       speedKmh = fix.speedKmh;
