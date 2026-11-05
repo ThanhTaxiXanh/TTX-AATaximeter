@@ -1710,7 +1710,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         status == MeterStatus.paused;
     if (_carPreview) return _buildCarMode();
     final mapHeight = (MediaQuery.sizeOf(context).height *
-        (active ? 0.35 : 0.39)).clamp(260.0, 385.0).toDouble();
+        (active ? 0.35 : 0.39)).clamp(335.0, 405.0).toDouble();
 
     return Scaffold(
       backgroundColor: DriverProColors.background,
