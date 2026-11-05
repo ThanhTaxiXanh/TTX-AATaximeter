@@ -4,6 +4,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../domain/trip_record.dart';
 import '../domain/trip_route_point.dart';
+import 'driver_pro_design.dart';
 
 String formatTripDate(DateTime value) {
   final local = value.toLocal();
@@ -14,7 +15,7 @@ String formatTripDate(DateTime value) {
 }
 
 String _money(num value) => value.round().toString().replaceAllMapped(
-  RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',') + ' đ';
+  RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => '.') + ' đ';
 
 /// Read-only journey map. Historical receipts without GPS samples do not
 /// invent a route or claim a map snapshot exists.
@@ -43,7 +44,7 @@ class _TripRouteMapState extends State<TripRouteMap> {
         height: 260,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: const Color(0xFF25272B),
+          color: DriverProColors.panel,
           borderRadius: BorderRadius.circular(16),
         ),
         child: const Column(mainAxisAlignment: MainAxisAlignment.center,
@@ -144,11 +145,12 @@ class TripDetailPage extends StatelessWidget {
     padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 17),
     margin: const EdgeInsets.only(bottom: 10),
     decoration: BoxDecoration(
-      color: const Color(0xFF29292C),
+      color: DriverProColors.panel,
+      border: Border.all(color: DriverProColors.border),
       borderRadius: BorderRadius.circular(13),
     ),
     child: Row(children: [
-      Icon(icon, color: const Color(0xFF168FFF), size: 22),
+      Icon(icon, color: DriverProColors.cyan, size: 22),
       const SizedBox(width: 12),
       Expanded(child: Text(title,
         style: const TextStyle(color: Colors.white60, fontSize: 15))),
@@ -166,9 +168,9 @@ class TripDetailPage extends StatelessWidget {
         ? record.fareProfileName
         : (record.vehicleType.isNotEmpty ? record.vehicleType : 'Xe taxi');
     return Scaffold(
-      backgroundColor: const Color(0xFF101010),
+      backgroundColor: DriverProColors.background,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF202023),
+        backgroundColor: DriverProColors.backgroundDeep,
         automaticallyImplyLeading: false,
         centerTitle: true,
         title: const Text('Chi tiết chuyến đi'),
@@ -198,7 +200,7 @@ class TripDetailPage extends StatelessWidget {
           _information(Icons.map_outlined, 'Quãng đường',
             receipt.distanceKm.toStringAsFixed(2) + ' km'),
           _information(Icons.payments_outlined, 'Thành tiền',
-            _money(receipt.totalFare), color: const Color(0xFF28CB60)),
+            _money(receipt.totalFare), color: DriverProColors.green),
           const SizedBox(height: 12),
           const Text('Thông tin thêm',
             style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20)),
@@ -211,10 +213,11 @@ class TripDetailPage extends StatelessWidget {
           _information(Icons.account_balance_wallet_outlined,
             'Thanh toán', record.paymentMethod.label),
           const SizedBox(height: 8),
-          FilledButton.icon(
+          DriverProAction(
+            label: 'Xem hóa đơn và thanh toán',
+            icon: Icons.receipt_long_outlined,
+            color: DriverProColors.blue,
             onPressed: onReceipt,
-            icon: const Icon(Icons.receipt_long_outlined),
-            label: const Text('Xem hóa đơn và thanh toán'),
           ),
           if (record.routePoints.isNotEmpty)
             const Padding(
