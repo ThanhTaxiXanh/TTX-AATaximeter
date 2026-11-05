@@ -90,6 +90,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   double _headingDegrees = 0;
   DashboardPreferences _dashboardPrefs = const DashboardPreferences();
   bool _is3D = false;
+  bool _enableSaved3DAfterFirstMapFrame = false;
   String? _startupError;
   final List<TripRoutePoint> _routePoints = [];
   int _routeSegment = 0;
@@ -222,9 +223,11 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       if (!mounted) return;
       setState(() {
         _dashboardPrefs = dashboardPrefs;
-        // Recovered trips are paused for safety, never auto-start 3D.
-        _is3D = meter.status == MeterStatus.paused
-            ? false : dashboardPrefs.default3D;
+        // Paint a lightweight 2D frame first; native MapLibre can initialize
+        // after position is known, avoiding a cold-start platform-view stall.
+        _is3D = false;
+        _enableSaved3DAfterFirstMapFrame =
+            meter.status == MeterStatus.idle && dashboardPrefs.default3D;
         _startupError = null;
         _bankBook = bankBook;
         _vehicle = registration;
@@ -233,6 +236,15 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       });
       if (meter.status != MeterStatus.idle) await _stopPreviewGps();
       unawaited(CarStateBridge.publish(meter));
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _storageReady &&
+            _enableSaved3DAfterFirstMapFrame && _mapLat != null) {
+          setState(() {
+            _enableSaved3DAfterFirstMapFrame = false;
+            _is3D = true;
+          });
+        }
+      });
       // Request location at first launch; automatically center the map.
       // Registration comes later so two dialogs never overlap.
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -419,6 +431,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           p.heading <= 360 && p.speed > 1.5) _headingDegrees = p.heading;
       _gpsStatus = 'GPS xem bản đồ ±' +
           p.accuracy.round().toString() + ' m';
+      if (_storageReady && _enableSaved3DAfterFirstMapFrame) {
+        _enableSaved3DAfterFirstMapFrame = false;
+        _is3D = true;
+      }
     });
   }
 
@@ -1408,6 +1424,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     final next = !_is3D;
     final settings = _dashboardPrefs.copyWith(default3D: next);
     setState(() {
+      _enableSaved3DAfterFirstMapFrame = false;
       _is3D = next;
       _dashboardPrefs = settings;
     });
@@ -1431,6 +1448,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     if (chosen == null || !mounted) return;
     setState(() {
       _dashboardPrefs = chosen;
+      _enableSaved3DAfterFirstMapFrame = false;
       if (meter.status == MeterStatus.idle) _is3D = chosen.default3D;
     });
     await _persistDashboardSettings(chosen);
