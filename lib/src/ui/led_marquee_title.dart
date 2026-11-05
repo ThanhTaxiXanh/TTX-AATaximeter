@@ -6,9 +6,11 @@ class LedMarqueeTitle extends StatefulWidget {
   const LedMarqueeTitle({
     super.key,
     this.message = 'Chúc quý khách thượng lộ bình an',
+    this.compact = false,
   });
 
   final String message;
+  final bool compact;
 
   @override
   State<LedMarqueeTitle> createState() => _LedMarqueeTitleState();
@@ -45,8 +47,15 @@ class _LedMarqueeTitleState extends State<LedMarqueeTitle>
     label: widget.message,
     child: ExcludeSemantics(child: LayoutBuilder(
       builder: (context, constraints) {
+        final style = widget.compact
+            ? _ledStyle.copyWith(
+                fontSize: 12,
+                color: const Color(0xFF82AEC7),
+                letterSpacing: 0.4,
+                shadows: const [])
+            : _ledStyle;
         final painter = TextPainter(
-          text: TextSpan(text: widget.message, style: _ledStyle),
+          text: TextSpan(text: widget.message, style: style),
           textDirection: Directionality.of(context),
           textScaler: MediaQuery.textScalerOf(context),
           maxLines: 1,
@@ -55,7 +64,7 @@ class _LedMarqueeTitleState extends State<LedMarqueeTitle>
         painter.dispose();
         final width = constraints.maxWidth;
         return SizedBox(
-          height: 34,
+          height: widget.compact ? 20 : 34,
           child: ClipRect(child: AnimatedBuilder(
             animation: _controller,
             builder: (context, child) {
@@ -77,7 +86,7 @@ class _LedMarqueeTitleState extends State<LedMarqueeTitle>
               widget.message,
               maxLines: 1,
               softWrap: false,
-              style: _ledStyle,
+              style: style,
               key: const Key('led-marquee-text'),
             ),
           )),
