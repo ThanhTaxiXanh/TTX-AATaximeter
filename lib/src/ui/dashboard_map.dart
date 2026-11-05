@@ -4,6 +4,7 @@ import 'package:latlong2/latlong.dart' as ll;
 
 import '../domain/trip_route_point.dart';
 import 'drive_map_3d.dart';
+import 'raster_tile_failover.dart';
 
 /// Lightweight OSM 2D map by default; native MapLibre only mounts in 3D.
 class DashboardMap extends StatefulWidget {
@@ -36,6 +37,8 @@ class _DashboardMapState extends State<DashboardMap> {
   final fm.MapController _map = fm.MapController();
   final GlobalKey<DriveMap3DState> _driveKey = GlobalKey<DriveMap3DState>();
   bool _ready = false, _follow = true;
+  final RasterTileFailover _tileFailover = RasterTileFailover();
+  bool _vector2DFallback = false;
   // Route points are append-only within a trip. Rebuild polyline geometries
   // only when the number/tail changes, not on every 1-second fare tick.
   int _cachedRouteCount = -1;
@@ -75,7 +78,7 @@ class _DashboardMapState extends State<DashboardMap> {
       widget.onLocate();
       return;
     }
-    if (widget.is3D) {
+    if (widget.is3D || _vector2DFallback) {
       _driveKey.currentState?.centerOnCar();
       return;
     }
@@ -84,7 +87,7 @@ class _DashboardMapState extends State<DashboardMap> {
   }
 
   void _zoom(double amount) {
-    if (widget.is3D) {
+    if (widget.is3D || _vector2DFallback) {
       _driveKey.currentState?.zoomBy(amount);
       return;
     }
@@ -94,11 +97,58 @@ class _DashboardMapState extends State<DashboardMap> {
   }
 
   void _northUp() {
-    if (widget.is3D) {
+    if (widget.is3D || _vector2DFallback) {
       _driveKey.currentState?.northUp();
     } else if (_ready) {
       _map.rotate(0);
     }
+  }
+
+  /// A run of failed OSM raster requests is a signal to switch sources, not
+  /// a signal to abandon GPS. MapLibre uses the already-configured legal
+  /// OpenFreeMap vector service, only as an on-demand fallback.
+  void _handleRasterTileError(Object error) {
+    debugPrint('TTX 2D raster tile failed: $error');
+    if (!_tileFailover.recordFailure()) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || widget.is3D || !_tileFailover.useVectorFallback) return;
+      setState(() {
+        _ready = false;
+        _vector2DFallback = true;
+      });
+    });
+  }
+
+  void _retryRaster2D() {
+    if (widget.is3D) return;
+    setState(() {
+      _tileFailover.reset();
+      _vector2DFallback = false;
+      _ready = false;
+      _follow = true;
+    });
+  }
+
+  Widget _rasterTileLayer() {
+    final tiles = fm.TileLayer(
+      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      userAgentPackageName: 'vn.thanhtaxixanh.ttx_aataximeter',
+      maxNativeZoom: 19,
+      errorTileCallback: (tile, error, stackTrace) =>
+          _handleRasterTileError(error),
+    );
+    // Never apply a transparent BlendMode.dst color filter in light mode.
+    // Some Android render paths leave the texture entirely blank.
+    if (!widget.dark) return tiles;
+    return ColorFiltered(
+      colorFilter: const ColorFilter.matrix([
+        -0.64, 0, 0, 0, 181,
+        0, -0.64, 0, 0, 182,
+        0, 0, -0.64, 0, 197,
+        0, 0, 0, 1, 0,
+      ]),
+      child: tiles,
+    );
   }
 
   @override
@@ -146,21 +196,7 @@ class _DashboardMapState extends State<DashboardMap> {
       },
     ),
     children: [
-      ColorFiltered(
-        colorFilter: widget.dark
-            ? const ColorFilter.matrix([
-                -0.64, 0, 0, 0, 181,
-                0, -0.64, 0, 0, 182,
-                0, 0, -0.64, 0, 197,
-                0, 0, 0, 1, 0,
-              ])
-            : const ColorFilter.mode(Colors.transparent, BlendMode.dst),
-        child: fm.TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'vn.thanhtaxixanh.ttx_aataximeter',
-          maxNativeZoom: 19,
-        ),
-      ),
+      _rasterTileLayer(),
       if (routeLines.isNotEmpty) fm.PolylineLayer(polylines: routeLines),
       if (_hasFix) fm.MarkerLayer(markers: [
         fm.Marker(
@@ -260,9 +296,10 @@ class _DashboardMapState extends State<DashboardMap> {
     child: SizedBox(
       height: 335,
       child: Stack(children: [
-        Positioned.fill(child: widget.is3D
+        Positioned.fill(child: (widget.is3D || _vector2DFallback)
           ? DriveMap3D(
               key: _driveKey,
+              flat2D: !widget.is3D,
               latitude: widget.latitude,
               longitude: widget.longitude,
               headingDegrees: widget.headingDegrees,
@@ -280,12 +317,33 @@ class _DashboardMapState extends State<DashboardMap> {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
               child: Text(widget.is3D ? '3D • GÓC NHÌN SAU XE'
-                  : (_hasFix ? '2D • VỊ TRÍ GPS' : '2D • CHỜ GPS'),
+                  : (_vector2DFallback ? '2D • OPENFREEMAP'
+                    : (_hasFix ? '2D • VỊ TRÍ GPS' : '2D • CHỜ GPS')),
                 style: const TextStyle(
                   color: Colors.white, fontSize: 10,
                   fontWeight: FontWeight.bold)),
             ),
           )),
+        if (_vector2DFallback && !widget.is3D)
+          Positioned(left: 8, top: 45,
+            child: Material(
+              color: const Color(0xDF10202E),
+              borderRadius: BorderRadius.circular(8),
+              child: InkWell(
+                onTap: _retryRaster2D,
+                borderRadius: BorderRadius.circular(8),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.refresh, color: Colors.cyanAccent, size: 15),
+                    SizedBox(width: 4),
+                    Text('Thử lại nền OSM', style: TextStyle(
+                      color: Colors.white, fontSize: 10)),
+                  ]),
+                ),
+              ),
+            ),
+          ),
         Positioned(right: 7, top: 7,
           child: Column(children: [
             _button(Text(widget.is3D ? '2D' : '3D',
@@ -309,7 +367,7 @@ class _DashboardMapState extends State<DashboardMap> {
           ]),
         ),
         Positioned(left: 8, bottom: 8, child: _speedPanel()),
-        if (!widget.is3D)
+        if (!widget.is3D && !_vector2DFallback)
           const Positioned(right: 5, bottom: 3,
             child: Text('© OpenStreetMap contributors',
               style: TextStyle(fontSize: 9, color: Colors.black87,
