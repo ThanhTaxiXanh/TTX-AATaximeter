@@ -137,10 +137,16 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
 
   Future<void> _initializeData() async {
     try {
+      // Begin independent preferences reads while SQLite is opening.
       final dashboardFuture = store.getString(
         DashboardPreferences.storageKey).catchError((Object _) => null);
+      final bankLegacyFuture = store.getString('ttx_vietqr_account_v1');
+      final bankBookFuture = store.getString('ttx_vietqr_bank_book_v1');
+      final vehicleFuture = store.getString('ttx_vehicle_v1');
+      final tariffFuture = store.getString('ttx_tariff_v1');
+      final catalogFuture = store.getString('ttx_tariff_catalog_v1');
       await repository.initializeAndMigrate(legacyPreferences: store);
-      final encodedBank = await store.getString('ttx_vietqr_account_v1');
+      final encodedBank = await bankLegacyFuture;
       VietQrAccount? account;
       if (encodedBank != null) {
         try {
@@ -153,7 +159,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       }
       BankBook bankBook = account == null
           ? const BankBook() : BankBook.migrateLegacy(account);
-      final savedBankBook = await store.getString('ttx_vietqr_bank_book_v1');
+      final savedBankBook = await bankBookFuture;
       if (savedBankBook != null) {
         try {
           bankBook = BankBook.decode(savedBankBook);
@@ -162,7 +168,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         }
       }
       VehicleRegistration? registration;
-      final rawVehicle = await store.getString('ttx_vehicle_v1');
+      final rawVehicle = await vehicleFuture;
       if (rawVehicle != null) {
         try {
           registration = VehicleRegistration.decode(rawVehicle);
@@ -170,7 +176,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           // Never trust a malformed registration. Re-prompt explicitly.
         }
       }
-      final savedTariff = await store.getString('ttx_tariff_v1');
+      final savedTariff = await tariffFuture;
       if (savedTariff != null) {
         try {
           meter.updateTariff(TariffCodec.decode(savedTariff));
@@ -179,7 +185,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         }
       }
       TariffCatalog catalog = TariffCatalog.initial(existing: meter.tariff);
-      final savedCatalog = await store.getString('ttx_tariff_catalog_v1');
+      final savedCatalog = await catalogFuture;
       if (savedCatalog != null) {
         try {
           catalog = TariffCatalog.decode(savedCatalog);

@@ -36,6 +36,48 @@ if app is not None:
     app.set("{" + uri + "}label", "TTX AATaximeter")
 tree.write(path, encoding="utf-8", xml_declaration=True)
 
+
+# Match Android's launch surface to the Flutter dark UI: never flash a
+# default white background while Android initializes its native plugins.
+# The app still renders the interactive Flutter view after normal startup.
+dark_launch = """<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+  <item android:drawable="@android:color/black" />
+</layer-list>
+"""
+for folder in ("drawable", "drawable-v21"):
+    file = Path("android/app/src/main/res") / folder / "launch_background.xml"
+    if file.is_file():
+        file.write_text(dark_launch, encoding="utf-8")
+
+for folder in ("values", "values-night"):
+    style_path = Path("android/app/src/main/res") / folder / "styles.xml"
+    if not style_path.is_file():
+        continue
+    style_tree = ET.parse(style_path)
+    for style in style_tree.getroot().findall("style"):
+        if style.attrib.get("name") in ("LaunchTheme", "NormalTheme"):
+            item = next((node for node in style.findall("item")
+                         if node.attrib.get("name") == "android:windowBackground"),
+                        None)
+            if item is None:
+                item = ET.SubElement(style, "item",
+                                     {"name": "android:windowBackground"})
+            item.text = "@drawable/launch_background"
+    style_tree.write(style_path, encoding="utf-8", xml_declaration=True)
+
+# Android 12+ uses a system-rendered splash before Flutter's first frame.
+v31 = Path("android/app/src/main/res/values-v31/styles.xml")
+v31.parent.mkdir(parents=True, exist_ok=True)
+v31.write_text("""<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+    <item name="android:windowSplashScreenBackground">#09090A</item>
+    <item name="android:windowBackground">@drawable/launch_background</item>
+  </style>
+</resources>
+""", encoding="utf-8")
+
 gradle = Path("android/app/build.gradle.kts")
 if not gradle.is_file():
     raise SystemExit("Flutter-generated Kotlin Gradle file is required")
