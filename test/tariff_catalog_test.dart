@@ -34,6 +34,27 @@ void main() {
     expect(chosen.active.tariff!.fareTiers!.length, 3);
   });
 
+  test('swipe delete model removes unused rate without changing active', () {
+    final original = TariffCatalog.initial();
+    final updated = original.remove('huong_giang');
+    expect(updated.profiles.length, 1);
+    expect(updated.activeId, 'urban');
+    expect(TariffCatalog.decode(updated.encode()).find('huong_giang'), isNull);
+  });
+
+  test('deleting active switches to an existing configured tariff', () {
+    final original = TariffCatalog.initial();
+    final rate = TariffConfig.demo().copyWith(name: 'Bảng thay thế');
+    final newCatalog = original.save(TariffProfile(
+      id: 'replacement', label: 'Bảng thay thế', tariff: rate,
+      verifiedByDriver: true,
+    ));
+    final updated = newCatalog.remove('urban');
+    expect(updated.activeId, 'replacement');
+    expect(updated.active.tariff!.baseFare, rate.baseFare);
+    expect(() => original.remove('urban'), throwsStateError);
+  });
+
   test('tier boundaries must be strictly increasing', () {
     final t = TariffConfig.demo().copyWith(fareTiers: const [
       FareTier(upToKm: 10, ratePerKm: 14000),
