@@ -39,6 +39,7 @@ class _DashboardMapState extends State<DashboardMap> {
   bool _ready = false, _follow = true;
   final RasterTileFailover _tileFailover = RasterTileFailover();
   bool _vector2DFallback = false;
+  int _rasterTileEpoch = 0;
   // Route points are append-only within a trip. Rebuild polyline geometries
   // only when the number/tail changes, not on every 1-second fare tick.
   int _cachedRouteCount = -1;
@@ -107,7 +108,10 @@ class _DashboardMapState extends State<DashboardMap> {
   /// A run of failed OSM raster requests is a signal to switch sources, not
   /// a signal to abandon GPS. MapLibre uses the already-configured legal
   /// OpenFreeMap vector service, only as an on-demand fallback.
-  void _handleRasterTileError(Object error) {
+  void _handleRasterTileError(Object error, int requestEpoch) {
+    // A prior TileLayer may complete after a manual retry or mode switch.
+    if (requestEpoch != _rasterTileEpoch ||
+        widget.is3D || _vector2DFallback) return;
     debugPrint('TTX 2D raster tile failed: $error');
     if (!_tileFailover.recordFailure()) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -122,6 +126,7 @@ class _DashboardMapState extends State<DashboardMap> {
   void _retryRaster2D() {
     if (widget.is3D) return;
     setState(() {
+      _rasterTileEpoch++;
       _tileFailover.reset();
       _vector2DFallback = false;
       _ready = false;
@@ -130,12 +135,13 @@ class _DashboardMapState extends State<DashboardMap> {
   }
 
   Widget _rasterTileLayer() {
+    final epoch = _rasterTileEpoch;
     final tiles = fm.TileLayer(
       urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
       userAgentPackageName: 'vn.thanhtaxixanh.ttx_aataximeter',
       maxNativeZoom: 19,
       errorTileCallback: (tile, error, stackTrace) =>
-          _handleRasterTileError(error),
+          _handleRasterTileError(error, epoch),
     );
     // Never apply a transparent BlendMode.dst color filter in light mode.
     // Some Android render paths leave the texture entirely blank.
