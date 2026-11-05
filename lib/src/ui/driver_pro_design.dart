@@ -253,6 +253,57 @@ class DriverProMetricCard extends StatelessWidget {
   );
 }
 
+/// Clear secondary action on the idle screen, directly below fare profile.
+class DriverProQuoteCard extends StatelessWidget {
+  const DriverProQuoteCard({super.key, required this.onPressed});
+
+  /// Disabled until trip storage has finished loading.
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    enabled: onPressed != null,
+    label: 'Báo giá chuyến đi, ước tính cước hoặc giá trọn gói',
+    child: InkWell(
+      key: const Key('driver-pro-quote-card'),
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(17),
+      child: DriverProPanel(
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 14),
+        child: Row(children: [
+          Container(
+            width: 40, height: 40,
+            decoration: BoxDecoration(
+              color: const Color(0xFF07364E),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            alignment: Alignment.center,
+            child: const Icon(Icons.calculate_outlined,
+              color: DriverProColors.cyan, size: 23),
+          ),
+          const SizedBox(width: 11),
+          const Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Báo giá chuyến đi',
+                style: TextStyle(
+                  color: Colors.white, fontSize: 15,
+                  fontWeight: FontWeight.w800)),
+              SizedBox(height: 3),
+              Text('Ước tính cước / giá trọn gói',
+                style: TextStyle(
+                  color: DriverProColors.muted, fontSize: 12)),
+            ],
+          )),
+          const Icon(Icons.chevron_right_rounded,
+            color: DriverProColors.cyan, size: 25),
+        ]),
+      ),
+    ),
+  );
+}
+
 class DriverProAction extends StatelessWidget {
   const DriverProAction({
     super.key, required this.label, required this.icon,
