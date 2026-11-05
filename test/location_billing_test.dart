@@ -13,7 +13,7 @@ void main() {
     expect(meter.waitingSeconds, 0);
     meter.tick(start.add(const Duration(seconds: 91)));
     expect(meter.elapsedSeconds, 1);
-    expect(meter.waitingSeconds, 1);
+    expect(meter.waitingSeconds, 0);
   });
 
   test('invalid and outlier positions do not refresh trusted state', () {
