@@ -97,6 +97,10 @@ class DriveMap3DState extends State<DriveMap3D> {
       _cameraGate.reset();
       // MapLibreMap changes styleString and recreates style layers.
     }
+    if (oldWidget.flat2D != widget.flat2D) {
+      _followCar = true;
+      _cameraGate.reset();
+    }
     if (oldWidget.flat2D != widget.flat2D ||
         oldWidget.pitchDegrees != widget.pitchDegrees ||
         oldWidget.latitude != widget.latitude ||
@@ -118,6 +122,18 @@ class DriveMap3DState extends State<DriveMap3D> {
   }
 
   void zoomBy(double delta) {
+    final controller = _map;
+    if (!_followCar && controller != null && _styleReady) {
+      // Keep the manually selected map centre when zoom buttons are pressed.
+      unawaited(controller.animateCamera(
+        gl.CameraUpdate.zoomBy(delta),
+        duration: const Duration(milliseconds: 220),
+      ).catchError((Object error) {
+        debugPrint('MapLibre manual zoom failed: $error');
+        return false;
+      }));
+      return;
+    }
     _zoom = (_zoom + delta).clamp(3.0, 19.0).toDouble();
     _moveToCar(force: true);
   }
@@ -126,14 +142,10 @@ class DriveMap3DState extends State<DriveMap3D> {
     _followCar = false;
     final controller = _map;
     if (controller == null || !_styleReady) return;
+    // Rotate in place; do not jump to the GPS when the user explored the map.
     unawaited(controller.animateCamera(
-      gl.CameraUpdate.newCameraPosition(gl.CameraPosition(
-        target: _target, zoom: _zoom,
-        tilt: widget.flat2D ? 0 :
-            widget.pitchDegrees.clamp(50.0, 60.0).toDouble(),
-        bearing: 0,
-      )),
-      duration: const Duration(milliseconds: 400),
+      gl.CameraUpdate.bearingTo(0),
+      duration: const Duration(milliseconds: 300),
     ).catchError((Object error) {
       debugPrint('MapLibre north-up failed: $error');
       return false;
