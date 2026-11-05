@@ -19,10 +19,13 @@ class DriveMap3D extends StatefulWidget {
     required this.pitchDegrees,
     required this.dark,
     required this.routePoints,
+    this.flat2D = false,
   });
   final double? latitude, longitude;
   final double headingDegrees, pitchDegrees;
   final bool dark;
+  /// Zero-pitch vector fallback for 2D when raster tiles fail.
+  final bool flat2D;
   final List<TripRoutePoint> routePoints;
 
   @override
@@ -59,6 +62,7 @@ class DriveMap3DState extends State<DriveMap3D> {
   gl.LatLng get _target {
     if (!_hasFix) return const gl.LatLng(16.0, 107.5);
     final lat = widget.latitude!, lon = widget.longitude!;
+    if (widget.flat2D) return gl.LatLng(lat, lon);
     // Shift the map target approximately 35m in front of the car so
     // the car remains in the lower part of the navigation perspective.
     final az = _heading * math.pi / 180;
@@ -76,8 +80,9 @@ class DriveMap3DState extends State<DriveMap3D> {
   gl.CameraPosition _camera() => gl.CameraPosition(
     target: _target,
     zoom: _hasFix ? _zoom : 5.3,
-    tilt: widget.pitchDegrees.clamp(50.0, 60.0).toDouble(),
-    bearing: _hasFix ? _heading : 0,
+    tilt: widget.flat2D ? 0 :
+        widget.pitchDegrees.clamp(50.0, 60.0).toDouble(),
+    bearing: widget.flat2D ? 0 : (_hasFix ? _heading : 0),
   );
 
   @override
@@ -92,7 +97,8 @@ class DriveMap3DState extends State<DriveMap3D> {
       _cameraGate.reset();
       // MapLibreMap changes styleString and recreates style layers.
     }
-    if (oldWidget.pitchDegrees != widget.pitchDegrees ||
+    if (oldWidget.flat2D != widget.flat2D ||
+        oldWidget.pitchDegrees != widget.pitchDegrees ||
         oldWidget.latitude != widget.latitude ||
         oldWidget.longitude != widget.longitude ||
         oldWidget.headingDegrees != widget.headingDegrees) {
@@ -123,7 +129,8 @@ class DriveMap3DState extends State<DriveMap3D> {
     unawaited(controller.animateCamera(
       gl.CameraUpdate.newCameraPosition(gl.CameraPosition(
         target: _target, zoom: _zoom,
-        tilt: widget.pitchDegrees.clamp(50.0, 60.0).toDouble(),
+        tilt: widget.flat2D ? 0 :
+            widget.pitchDegrees.clamp(50.0, 60.0).toDouble(),
         bearing: 0,
       )),
       duration: const Duration(milliseconds: 400),
@@ -252,29 +259,31 @@ class DriveMap3DState extends State<DriveMap3D> {
     _lastRouteCount = -1;
     _lastRoutePoint = null;
     _cameraGate.reset();
-    // Both OpenFreeMap Liberty and Dark use the OpenMapTiles "building"
-    // vector source layer. Where OSM has no height, a modest 9m extrusion
-    // is an illustration, not a measured real-world building height.
-    try {
-      await controller.addFillExtrusionLayer(
-        'openmaptiles',
-        'ttx-3d-buildings',
-        gl.FillExtrusionLayerProperties(
-          fillExtrusionColor: widget.dark ? '#46546b' : '#b4afa5',
-          fillExtrusionOpacity: 0.88,
-          fillExtrusionHeight: [
-            'coalesce', ['get', 'render_height'], 9
-          ],
-          fillExtrusionBase: [
-            'coalesce', ['get', 'render_min_height'], 0
-          ],
-        ),
-        sourceLayer: 'building',
-        minzoom: 14,
-      );
-    } catch (error) {
-      // The map stays usable if this style's building source is missing.
-      debugPrint('3D building layer not available: $error');
+    if (!widget.flat2D) {
+      // Both OpenFreeMap Liberty and Dark use the OpenMapTiles "building"
+      // vector source layer. Where OSM has no height, a modest 9m extrusion
+      // is an illustration, not a measured real-world building height.
+      try {
+        await controller.addFillExtrusionLayer(
+          'openmaptiles',
+          'ttx-3d-buildings',
+          gl.FillExtrusionLayerProperties(
+            fillExtrusionColor: widget.dark ? '#46546b' : '#b4afa5',
+            fillExtrusionOpacity: 0.88,
+            fillExtrusionHeight: [
+              'coalesce', ['get', 'render_height'], 9
+            ],
+            fillExtrusionBase: [
+              'coalesce', ['get', 'render_min_height'], 0
+            ],
+          ),
+          sourceLayer: 'building',
+          minzoom: 14,
+        );
+      } catch (error) {
+        // The map stays usable if this style's building source is missing.
+        debugPrint('3D building layer not available: $error');
+      }
     }
     try {
       await controller.addGeoJsonSource('ttx-route', _routeGeoJson());
@@ -339,6 +348,12 @@ class DriveMap3DState extends State<DriveMap3D> {
       foregroundLoadColor: widget.dark
           ? const Color(0xFF101A28) : const Color(0xFFEEEAE0),
       onMapCreated: (controller) => _map = controller,
+      onCameraMoveStarted: (reason) {
+        // Respect manual pan/rotate/zoom. The recenter button restores follow.
+        if (reason == gl.CameraMoveReason.gesture) {
+          _followCar = false;
+        }
+      },
       onStyleLoadedCallback: () => unawaited(_onStyleLoaded()),
     ),
     const Positioned(
