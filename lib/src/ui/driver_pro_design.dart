@@ -273,7 +273,9 @@ class DriverProQuoteCard extends StatelessWidget {
       key: const Key('driver-pro-quote-card'),
       onTap: onPressed,
       borderRadius: BorderRadius.circular(17),
-      child: DriverProPanel(
+      child: Opacity(
+        opacity: onPressed == null ? 0.55 : 1.0,
+        child: DriverProPanel(
         padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 14),
         child: Row(children: [
           Container(
@@ -303,6 +305,7 @@ class DriverProQuoteCard extends StatelessWidget {
           const Icon(Icons.chevron_right_rounded,
             color: DriverProColors.cyan, size: 25),
         ]),
+        ),
       ),
     ),
   );
