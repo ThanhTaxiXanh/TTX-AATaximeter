@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as gl;
@@ -308,7 +309,7 @@ Map<String, dynamic> gpsArrowGeoJson(
 
 /// Rasterized once per style load; the arrow has shaded faces and a small
 /// shadow for perspective but remains a light 2D billboard, not a 3D mesh.
-Future<ui.Uint8List> _paintArrowImage() async {
+Future<Uint8List> _paintArrowImage() async {
   const size = Size(92, 106);
   const pixelRatio = 2.0;
   final recorder = ui.PictureRecorder();
