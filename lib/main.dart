@@ -27,6 +27,7 @@ import 'src/domain/tariff_catalog.dart';
 import 'src/ui/tariff_catalog_page.dart';
 import 'src/ui/tariff_settings_dialog.dart';
 import 'src/ui/dashboard_map.dart';
+import 'src/ui/led_marquee_title.dart';
 import 'src/platform/car_state_bridge.dart';
 import 'src/domain/vehicle_registration.dart';
 import 'src/ui/vehicle_registration_dialog.dart';
@@ -1278,9 +1279,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       backgroundColor: const Color(0xFF09090A),
       appBar: AppBar(
         backgroundColor: const Color(0xFF080809),
-        title: const Text('Đồng hồ cước taxi, xe ôm',
-          maxLines: 1, overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+        title: const LedMarqueeTitle(),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings_outlined),

@@ -126,27 +126,27 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
 
   Widget _statCard(IconData icon, Color color, String value, String label) =>
       Container(
-        height: 135,
-        padding: const EdgeInsets.all(15),
+        height: 94,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
         decoration: BoxDecoration(
           color: const Color(0xFF202023),
           borderRadius: BorderRadius.circular(16),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: color, size: 24),
+            Icon(icon, color: color, size: 19),
             const Spacer(),
             FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
               child: Text(value,
-                style: const TextStyle(fontSize: 25,
+                style: const TextStyle(fontSize: 22,
                   color: Colors.white, fontWeight: FontWeight.w800)),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 3),
             Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: Colors.white60,
-                fontSize: 12)),
+                fontSize: 11)),
           ],
         ),
       );
@@ -246,7 +246,7 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
             padding: const EdgeInsets.fromLTRB(14, 13, 14, 22),
             children: [
               _periodPicker(),
-              const SizedBox(height: 17),
+              const SizedBox(height: 11),
               Row(children: [
                 Expanded(child: _statCard(Icons.attach_money,
                   const Color(0xFF28CB60),
@@ -256,7 +256,7 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
                   const Color(0xFF168FFF),
                   report.tripCount.toString(), 'Tổng số chuyến')),
               ]),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               Row(children: [
                 Expanded(child: _statCard(Icons.map_outlined,
                   const Color(0xFFFF9731),
@@ -267,7 +267,7 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
                   const Color(0xFFD13FEC),
                   _cash(report.averageFare), 'Tiền TB/chuyến')),
               ]),
-              const SizedBox(height: 18),
+              const SizedBox(height: 12),
               const Text('Lịch sử chuyến đi',
                 style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
               const SizedBox(height: 13),
