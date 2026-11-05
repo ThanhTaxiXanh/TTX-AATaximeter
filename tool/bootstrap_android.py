@@ -7,6 +7,7 @@ taximeter-only behavior does not meet a verified Android Auto app category.
 """
 from pathlib import Path
 from shutil import copy2
+import os
 from xml.etree import ElementTree as ET
 
 path = Path("android/app/src/main/AndroidManifest.xml")
@@ -82,24 +83,59 @@ gradle = Path("android/app/build.gradle.kts")
 if not gradle.is_file():
     raise SystemExit("Flutter-generated Kotlin Gradle file is required")
 content = gradle.read_text()
-if "androidx.car.app:app:1.7.0" not in content:
-    content += """
-// Android for Cars read-only scaffold. NOT registered as a CarAppService.
-dependencies {
-    implementation("androidx.car.app:app:1.7.0")
-    implementation("androidx.car.app:app-projected:1.7.0")
-}
-"""
-    gradle.write_text(content)
+
+# These CarAppService classes are NOT registered in AndroidManifest and have
+# no working Android Auto UI. Excluding them from ordinary phone APKs removes
+# unused AndroidX Car dependencies without changing the Flutter taximeter,
+# the native MethodChannel, GPS/FGS or local trip data.
+# To develop the future Android Auto scaffold, explicitly opt in during
+# bootstrap: TTX_INCLUDE_CAR_SCAFFOLD=1 python3 tool/bootstrap_android.py
+include_car_scaffold = os.getenv("TTX_INCLUDE_CAR_SCAFFOLD") == "1"
 
 source = Path("tool/android_templates")
 target = Path(
     "android/app/src/main/kotlin/vn/thanhtaxixanh/ttx_aataximeter"
 )
 target.mkdir(parents=True, exist_ok=True)
-for name in ("MainActivity.kt", "CarStateStore.kt",
-             "TtxCarAppService.kt", "TtxCarScreen.kt"):
+
+# The MethodChannel and display state mirror are still used on the phone.
+for name in ("MainActivity.kt", "CarStateStore.kt"):
     copy2(source / name, target / name)
 
-print("Android GPS permissions, Flutter bridge and native scaffold installed.")
-print("CarAppService not registered: no verified eligible Android Auto category.")
+optional_car_sources = ("TtxCarAppService.kt", "TtxCarScreen.kt")
+if include_car_scaffold:
+    for name in optional_car_sources:
+        copy2(source / name, target / name)
+    if "androidx.car.app:app:1.7.0" not in content:
+        content += """
+// Experimental (unregistered) Android Auto display scaffold. Explicit opt-in.
+dependencies {
+    implementation("androidx.car.app:app:1.7.0")
+    implementation("androidx.car.app:app-projected:1.7.0")
+}
+"""
+else:
+    # Idempotency: running bootstrap a second time must not retain optional
+    # Android for Cars classes from a previous opt-in invocation.
+    for name in optional_car_sources:
+        (target / name).unlink(missing_ok=True)
+    if "androidx.car.app:app:1.7.0" in content:
+        content = content.replace("""
+// Experimental (unregistered) Android Auto display scaffold. Explicit opt-in.
+dependencies {
+    implementation("androidx.car.app:app:1.7.0")
+    implementation("androidx.car.app:app-projected:1.7.0")
+}
+""", "")
+        content = content.replace("""
+// Android for Cars read-only scaffold. NOT registered as a CarAppService.
+dependencies {
+    implementation("androidx.car.app:app:1.7.0")
+    implementation("androidx.car.app:app-projected:1.7.0")
+}
+""", "")
+gradle.write_text(content)
+
+print("Android GPS permissions and native Flutter display bridge installed.")
+print("Experimental CarAppService compiled:", include_car_scaffold)
+print("CarAppService is still unregistered; no eligible Android Auto host yet.")

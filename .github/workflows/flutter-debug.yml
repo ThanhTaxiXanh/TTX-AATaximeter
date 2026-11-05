@@ -37,7 +37,40 @@ jobs:
         run: flutter build apk --debug
       - name: Verify APK merged GPS foreground-service manifest
         run: python3 tool/verify_apk_manifest.py
+      - name: Report original universal debug APK size
+        run: |
+          python3 tool/apk_size_report.py build/app/outputs/flutter-apk/app-debug.apk --output build/debug-size.txt
+          cat build/debug-size.txt
       - uses: actions/upload-artifact@v4
         with:
           name: ttx-aataximeter-mvp-debug
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          path: |
+            build/app/outputs/flutter-apk/app-debug.apk
+            build/debug-size.txt
+
+      # AOT Dart + R8/Flutter tree-shaking + per-ABI native libraries.
+      # An Android release keystore has NOT been configured in this repo.
+      # This is a TEST-ONLY release build signed using Flutter's temporary
+      # debug key. Never claim it is suitable for production distribution.
+      - name: Build optimized Android ARM64 APK (test-only signing)
+        run: flutter build apk --release --split-per-abi --target-platform android-arm64
+      - name: Report ARM64 optimized APK size
+        run: |
+          test -f build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          python3 tool/apk_size_report.py build/app/outputs/flutter-apk/app-arm64-v8a-release.apk --output build/arm64-size.txt
+          cat build/arm64-size.txt
+          {
+            echo "### TTX APK size comparison"
+            echo "Debug universal:"
+            grep -m1 'APK size:' build/debug-size.txt
+            echo "Release ARM64 (test signing only):"
+            grep -m1 'APK size:' build/arm64-size.txt
+            echo "Android release APK is signed with Flutter's temporary debug key; install/update compatibility with earlier APKs is not guaranteed."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ttx-aataximeter-arm64-optimized-test-only
+          path: |
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            build/arm64-size.txt
+
