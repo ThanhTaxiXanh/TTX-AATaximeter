@@ -41,6 +41,11 @@ class DriveMap3DState extends State<DriveMap3D> {
   bool _arrowDirty = false;
   bool _updatingRoute = false;
   bool _routeDirty = false;
+  // Avoid uploading the entire accumulated route to native MapLibre for
+  // every accepted GPS sample. The saved route itself is never throttled.
+  static const Duration _routeRenderInterval = Duration(seconds: 2);
+  Timer? _routeRenderTimer;
+  DateTime? _lastNativeRouteUpload;
   int _lastRouteCount = -1;
   TripRoutePoint? _lastRoutePoint;
   final FollowCameraGate _cameraGate = FollowCameraGate();
@@ -89,6 +94,9 @@ class DriveMap3DState extends State<DriveMap3D> {
   void didUpdateWidget(covariant DriveMap3D oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.dark != widget.dark) {
+      _routeRenderTimer?.cancel();
+      _routeRenderTimer = null;
+      _lastNativeRouteUpload = null;
       _styleReady = false;
       _routeReady = false;
       _arrowReady = false;
@@ -112,7 +120,7 @@ class DriveMap3DState extends State<DriveMap3D> {
     if (_lastRouteCount != widget.routePoints.length ||
         !identical(_lastRoutePoint,
             widget.routePoints.isEmpty ? null : widget.routePoints.last)) {
-      unawaited(_refreshRoute());
+      _scheduleRouteRender();
     }
   }
 
@@ -210,6 +218,24 @@ class DriveMap3DState extends State<DriveMap3D> {
     }
   }
 
+  /// Coalesce rapid GPS callbacks into one complete native line update.
+  /// This only controls pixels: no recorded route point is removed.
+  void _scheduleRouteRender() {
+    if (!_routeReady || !mounted) return;
+    if (_routeRenderTimer != null) return;
+    final last = _lastNativeRouteUpload;
+    final age = last == null ? _routeRenderInterval
+        : DateTime.now().difference(last);
+    if (age >= _routeRenderInterval || age.isNegative) {
+      unawaited(_refreshRoute());
+      return;
+    }
+    _routeRenderTimer = Timer(_routeRenderInterval - age, () {
+      _routeRenderTimer = null;
+      if (mounted) unawaited(_refreshRoute());
+    });
+  }
+
   Map<String, dynamic> _routeGeoJson() {
     final bySegment = <int, List<List<double>>>{};
     for (final point in widget.routePoints) {
@@ -253,6 +279,7 @@ class DriveMap3DState extends State<DriveMap3D> {
             !identical(_map, controller)) break;
         _lastRouteCount = count;
         _lastRoutePoint = last;
+        _lastNativeRouteUpload = DateTime.now();
       } while (_routeDirty && mounted && _routeReady &&
           identical(_map, controller));
     } catch (error) {
@@ -266,6 +293,9 @@ class DriveMap3DState extends State<DriveMap3D> {
     final controller = _map;
     if (controller == null || !mounted) return;
     _styleReady = true;
+    _routeRenderTimer?.cancel();
+    _routeRenderTimer = null;
+    _lastNativeRouteUpload = null;
     _routeReady = false;
     _arrowReady = false;
     _lastRouteCount = -1;
@@ -312,6 +342,7 @@ class DriveMap3DState extends State<DriveMap3D> {
       _lastRouteCount = widget.routePoints.length;
       _lastRoutePoint = widget.routePoints.isEmpty
           ? null : widget.routePoints.last;
+      _lastNativeRouteUpload = DateTime.now();
     } catch (error) {
       debugPrint('3D route layer not available: $error');
     }
@@ -319,7 +350,7 @@ class DriveMap3DState extends State<DriveMap3D> {
     // aimed ahead of the car independently without changing the GPS position.
     try {
       await controller.addImage('ttx-3d-navigation-arrow',
-        await _paintArrowImage());
+        await _cachedArrowImage());
       await controller.addGeoJsonSource('ttx-gps-arrow-position',
         gpsArrowGeoJson(widget.latitude, widget.longitude, _heading));
       await controller.addSymbolLayer(
@@ -342,6 +373,12 @@ class DriveMap3DState extends State<DriveMap3D> {
       debugPrint('GPS navigation arrow layer unavailable: $error');
     }
     if (mounted) _moveToCar(force: true);
+  }
+
+  @override
+  void dispose() {
+    _routeRenderTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -402,8 +439,26 @@ Map<String, dynamic> gpsArrowGeoJson(
   };
 }
 
-/// Rasterized once per style load; the arrow has shaded faces and a small
-/// shadow for perspective but remains a light 2D billboard, not a 3D mesh.
+/// Rendered once per app process and reused across 2D vector fallback,
+/// 3D mode, and day/night style changes to avoid repeated PNG encoding.
+Future<Uint8List>? _navigationArrowCache;
+
+Future<Uint8List> _cachedArrowImage() {
+  final existing = _navigationArrowCache;
+  if (existing != null) return existing;
+  final pending = _paintArrowImage();
+  _navigationArrowCache = pending;
+  // If rendering fails (for example during graphics context loss), a
+  // later style reload should retry rather than cache a permanent failure.
+  pending.then<void>((_) {}, onError: (Object error) {
+    if (identical(_navigationArrowCache, pending)) {
+      _navigationArrowCache = null;
+    }
+  });
+  return pending;
+}
+
+/// Shaded bitmap billboard, not a physical 3D mesh.
 Future<Uint8List> _paintArrowImage() async {
   const size = Size(92, 106);
   const pixelRatio = 2.0;
