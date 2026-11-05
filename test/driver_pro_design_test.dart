@@ -50,6 +50,35 @@ void main() {
     expect(find.text('125.000 đ'), findsOneWidget);
   });
 
+  testWidgets('ready screen quote card opens quotation on tap',
+      (tester) async {
+    var openCount = 0;
+    await tester.pumpWidget(shell(SizedBox(
+      width: 340,
+      child: DriverProQuoteCard(onPressed: () => openCount++),
+    )));
+    expect(find.byKey(const Key('driver-pro-quote-card')),
+      findsOneWidget);
+    expect(find.text('Báo giá chuyến đi'), findsOneWidget);
+    expect(find.text('Ước tính cước / giá trọn gói'), findsOneWidget);
+    await tester.tap(find.text('Báo giá chuyến đi'));
+    expect(openCount, 1);
+    expect(find.byKey(const Key('driver-pro-fare-card')), findsNothing);
+  });
+
+  testWidgets('quote card is disabled while trip data is still loading',
+      (tester) async {
+    await tester.pumpWidget(shell(const SizedBox(
+      width: 340,
+      child: DriverProQuoteCard(onPressed: null),
+    )));
+    expect(find.byKey(const Key('driver-pro-quote-card')),
+      findsOneWidget);
+    expect(find.text('Báo giá chuyến đi'), findsOneWidget);
+    await tester.tap(find.text('Báo giá chuyến đi'));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Driver Pro action is a real tappable button',
       (tester) async {
     var count = 0;
