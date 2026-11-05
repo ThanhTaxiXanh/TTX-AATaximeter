@@ -141,10 +141,14 @@ class DriverProStatusBanner extends StatelessWidget {
         children: [
           Icon(symbol, size: 20, color: color),
           const SizedBox(width: 8),
-          Text(label,
-            style: TextStyle(color: color,
-              fontSize: 18, fontWeight: FontWeight.w900,
-              letterSpacing: 0.8)),
+          Flexible(
+            child: Text(label,
+              textAlign: TextAlign.center,
+              softWrap: true,
+              style: TextStyle(color: color,
+                fontSize: 18, fontWeight: FontWeight.w900,
+                letterSpacing: 0.8)),
+          ),
         ],
       ),
     );
