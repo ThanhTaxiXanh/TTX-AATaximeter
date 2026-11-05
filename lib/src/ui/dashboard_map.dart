@@ -36,6 +36,13 @@ class DashboardMap extends StatefulWidget {
 class _DashboardMapState extends State<DashboardMap> {
   final fm.MapController _map = fm.MapController();
   final GlobalKey<DriveMap3DState> _driveKey = GlobalKey<DriveMap3DState>();
+  // Distinct native map states: switching fallback 2D <-> real 3D must
+  // recreate their style layers (including optional building extrusions).
+  final GlobalKey<DriveMap3DState> _flatVectorKey =
+      GlobalKey<DriveMap3DState>();
+
+  DriveMap3DState? get _activeVectorMap => widget.is3D
+      ? _driveKey.currentState : _flatVectorKey.currentState;
   bool _ready = false, _follow = true;
   final RasterTileFailover _tileFailover = RasterTileFailover();
   bool _vector2DFallback = false;
@@ -80,7 +87,7 @@ class _DashboardMapState extends State<DashboardMap> {
       return;
     }
     if (widget.is3D || _vector2DFallback) {
-      _driveKey.currentState?.centerOnCar();
+      _activeVectorMap?.centerOnCar();
       return;
     }
     setState(() => _follow = true);
@@ -89,7 +96,7 @@ class _DashboardMapState extends State<DashboardMap> {
 
   void _zoom(double amount) {
     if (widget.is3D || _vector2DFallback) {
-      _driveKey.currentState?.zoomBy(amount);
+      _activeVectorMap?.zoomBy(amount);
       return;
     }
     if (!_ready) return;
@@ -99,7 +106,7 @@ class _DashboardMapState extends State<DashboardMap> {
 
   void _northUp() {
     if (widget.is3D || _vector2DFallback) {
-      _driveKey.currentState?.northUp();
+      _activeVectorMap?.northUp();
     } else if (_ready) {
       _map.rotate(0);
     }
@@ -305,7 +312,7 @@ class _DashboardMapState extends State<DashboardMap> {
       child: Stack(children: [
         Positioned.fill(child: (widget.is3D || _vector2DFallback)
           ? DriveMap3D(
-              key: _driveKey,
+              key: widget.is3D ? _driveKey : _flatVectorKey,
               flat2D: !widget.is3D,
               latitude: widget.latitude,
               longitude: widget.longitude,
