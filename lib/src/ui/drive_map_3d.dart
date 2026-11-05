@@ -334,7 +334,11 @@ class DriveMap3DState extends State<DriveMap3D> {
 
   @override
   Widget build(BuildContext context) => Stack(children: [
-    gl.MapLibreMap(
+    // Pointer listener is compatible with MapLibre 0.27.1, which does not
+    // yet expose onCameraMoveStarted/CameraMoveReason in the widget.
+    Listener(
+      onPointerDown: (_) => _followCar = false,
+      child: gl.MapLibreMap(
       styleString: widget.dark
           ? 'https://tiles.openfreemap.org/styles/dark'
           : 'https://tiles.openfreemap.org/styles/liberty',
@@ -348,13 +352,8 @@ class DriveMap3DState extends State<DriveMap3D> {
       foregroundLoadColor: widget.dark
           ? const Color(0xFF101A28) : const Color(0xFFEEEAE0),
       onMapCreated: (controller) => _map = controller,
-      onCameraMoveStarted: (reason) {
-        // Respect manual pan/rotate/zoom. The recenter button restores follow.
-        if (reason == gl.CameraMoveReason.gesture) {
-          _followCar = false;
-        }
-      },
       onStyleLoadedCallback: () => unawaited(_onStyleLoaded()),
+    ),
     ),
     const Positioned(
       bottom: 6, right: 5,
