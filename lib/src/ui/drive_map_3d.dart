@@ -229,14 +229,14 @@ class DriveMap3DState extends State<DriveMap3D> {
     // aimed ahead of the car independently without changing the GPS position.
     try {
       await controller.addImage('ttx-3d-navigation-arrow',
-        await _paintArrowImage(), false, 2);
+        await _paintArrowImage());
       await controller.addGeoJsonSource('ttx-gps-arrow-position',
         gpsArrowGeoJson(widget.latitude, widget.longitude, _heading));
       await controller.addSymbolLayer(
         'ttx-gps-arrow-position', 'ttx-gps-arrow',
         const gl.SymbolLayerProperties(
           iconImage: 'ttx-3d-navigation-arrow',
-          iconSize: 0.85,
+          iconSize: 0.42,
           iconAnchor: 'center',
           iconAllowOverlap: true,
           iconIgnorePlacement: true,
