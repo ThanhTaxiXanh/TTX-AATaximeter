@@ -5,7 +5,8 @@ void main() {
   const tariff = TariffConfig(
     baseFare: 12000, baseDistanceKm: 1, perKmRate: 15000,
     longDistanceThresholdKm: 10, longDistancePerKmRate: 10000,
-    waitingFeePerHour: 36000, roundToThousands: false,
+    waitingFeePerHour: 36000, waitingGraceMinutes: 0,
+    roundToThousands: false,
   );
 
   test('opening fare and 2-tier distance', () {
@@ -31,6 +32,42 @@ void main() {
     expect(m.elapsedSeconds, 45);
     expect(m.waitingFare, 450);
     m.resume(at: start.add(const Duration(seconds: 45)));
+  });
+
+  test('five-minute stop does not charge waiting until second 301', () {
+    final m = TaximeterEngine(tariff: tariff.copyWith(
+      waitingGraceMinutes: 5));
+    final start = DateTime(2026);
+    m.start(at: start);
+    m.tick(start.add(const Duration(seconds: 299)));
+    expect(m.waitingSeconds, 0);
+    expect(m.waitingFare, 0);
+    m.tick(start.add(const Duration(minutes: 5)));
+    expect(m.waitingSeconds, 0);
+    m.tick(start.add(const Duration(seconds: 301)));
+    expect(m.waitingSeconds, 1);
+    expect(m.waitingFare, 10);
+    m.tick(start.add(const Duration(minutes: 6)));
+    expect(m.waitingSeconds, 60);
+  });
+
+  test('moving resets stop timer and GPS gap does not count', () {
+    final m = TaximeterEngine(tariff: tariff.copyWith(
+      waitingGraceMinutes: 5));
+    final start = DateTime(2026);
+    m.start(at: start);
+    m.tick(start.add(const Duration(minutes: 4)));
+    expect(m.waitingSeconds, 0);
+    m.speedKmh = 25;
+    m.tick(start.add(const Duration(minutes: 5)));
+    m.speedKmh = 0;
+    m.tick(start.add(const Duration(minutes: 9)));
+    expect(m.waitingSeconds, 0);
+    m.skipUntrustedInterval(start.add(const Duration(minutes: 12)));
+    m.tick(start.add(const Duration(minutes: 16)));
+    expect(m.waitingSeconds, 0);
+    m.tick(start.add(const Duration(minutes: 18)));
+    expect(m.waitingSeconds, 60);
   });
 
   test('flat fare excludes distance/wait but includes extra charges', () {
