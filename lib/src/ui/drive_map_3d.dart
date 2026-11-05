@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as gl;
 import '../domain/trip_route_point.dart';
+import 'follow_camera_gate.dart';
 
 /// GPS arrow is a native geo-referenced symbol, not a fixed HUD overlay.
 /// Native MapLibre vector map with pitch, heading-up camera and OSM buildings.
@@ -33,7 +34,16 @@ class DriveMap3DState extends State<DriveMap3D> {
   bool _styleReady = false;
   bool _routeReady = false;
   bool _arrowReady = false;
+  bool _updatingArrow = false;
+  bool _arrowDirty = false;
+  bool _updatingRoute = false;
+  bool _routeDirty = false;
   int _lastRouteCount = -1;
+  TripRoutePoint? _lastRoutePoint;
+  final FollowCameraGate _cameraGate = FollowCameraGate();
+  bool _cameraAnimating = false;
+  bool _cameraQueued = false;
+  bool _cameraQueuedForce = false;
   double _zoom = 17;
   bool _followCar = true;
 
@@ -78,6 +88,8 @@ class DriveMap3DState extends State<DriveMap3D> {
       _routeReady = false;
       _arrowReady = false;
       _lastRouteCount = -1;
+      _lastRoutePoint = null;
+      _cameraGate.reset();
       // MapLibreMap changes styleString and recreates style layers.
     }
     if (oldWidget.pitchDegrees != widget.pitchDegrees ||
@@ -87,19 +99,21 @@ class DriveMap3DState extends State<DriveMap3D> {
       unawaited(_refreshArrow());
       if (_followCar) _moveToCar();
     }
-    if (_lastRouteCount != widget.routePoints.length) {
+    if (_lastRouteCount != widget.routePoints.length ||
+        !identical(_lastRoutePoint,
+            widget.routePoints.isEmpty ? null : widget.routePoints.last)) {
       unawaited(_refreshRoute());
     }
   }
 
   void centerOnCar() {
     _followCar = true;
-    _moveToCar();
+    _moveToCar(force: true);
   }
 
   void zoomBy(double delta) {
     _zoom = (_zoom + delta).clamp(3.0, 19.0).toDouble();
-    _moveToCar();
+    _moveToCar(force: true);
   }
 
   void northUp() {
@@ -119,26 +133,61 @@ class DriveMap3DState extends State<DriveMap3D> {
     }));
   }
 
-  void _moveToCar() {
+  /// Serialize native camera animations instead of stacking a new animation
+  /// for every GPS callback. The latest position is replayed when one finishes.
+  void _moveToCar({bool force = false}) {
     final controller = _map;
     if (controller == null || !_styleReady || !_hasFix || !_followCar) return;
+    if (_cameraAnimating) {
+      _cameraQueued = true;
+      _cameraQueuedForce = _cameraQueuedForce || force;
+      return;
+    }
+    final next = _camera();
+    if (!_cameraGate.shouldUpdate(
+      at: DateTime.now(), latitude: next.target.latitude,
+      longitude: next.target.longitude, bearing: next.bearing,
+      zoom: next.zoom, force: force,
+    )) return;
+    _cameraAnimating = true;
     unawaited(controller.animateCamera(
-      gl.CameraUpdate.newCameraPosition(_camera()),
-      duration: const Duration(milliseconds: 500),
+      gl.CameraUpdate.newCameraPosition(next),
+      duration: const Duration(milliseconds: 400),
     ).catchError((Object error) {
       debugPrint('MapLibre camera update failed: $error');
       return false;
+    }).whenComplete(() {
+      _cameraAnimating = false;
+      final pending = _cameraQueued;
+      final forced = _cameraQueuedForce;
+      _cameraQueued = false;
+      _cameraQueuedForce = false;
+      if (pending && mounted && identical(_map, controller) &&
+          _styleReady && _followCar) {
+        _moveToCar(force: forced);
+      }
     }));
   }
 
   Future<void> _refreshArrow() async {
     final controller = _map;
     if (controller == null || !mounted || !_arrowReady) return;
+    if (_updatingArrow) {
+      _arrowDirty = true; // Latest GPS wins; do not queue old positions.
+      return;
+    }
+    _updatingArrow = true;
     try {
-      await controller.setGeoJsonSource('ttx-gps-arrow-position',
-        gpsArrowGeoJson(widget.latitude, widget.longitude, _heading));
+      do {
+        _arrowDirty = false;
+        await controller.setGeoJsonSource('ttx-gps-arrow-position',
+          gpsArrowGeoJson(widget.latitude, widget.longitude, _heading));
+      } while (_arrowDirty && mounted && _arrowReady &&
+          identical(_map, controller));
     } catch (error) {
       debugPrint('Cannot update GPS arrow: $error');
+    } finally {
+      _updatingArrow = false;
     }
   }
 
@@ -168,13 +217,29 @@ class DriveMap3DState extends State<DriveMap3D> {
   Future<void> _refreshRoute() async {
     final controller = _map;
     if (!_routeReady || controller == null || !mounted) return;
-    final size = widget.routePoints.length;
-    if (size == _lastRouteCount) return;
+    if (_updatingRoute) {
+      _routeDirty = true;
+      return;
+    }
+    _updatingRoute = true;
     try {
-      await controller.setGeoJsonSource('ttx-route', _routeGeoJson());
-      if (mounted) _lastRouteCount = size;
+      do {
+        _routeDirty = false;
+        final count = widget.routePoints.length;
+        final last = count == 0 ? null : widget.routePoints.last;
+        if (count == _lastRouteCount &&
+            identical(last, _lastRoutePoint)) break;
+        await controller.setGeoJsonSource('ttx-route', _routeGeoJson());
+        if (!mounted || !_routeReady ||
+            !identical(_map, controller)) break;
+        _lastRouteCount = count;
+        _lastRoutePoint = last;
+      } while (_routeDirty && mounted && _routeReady &&
+          identical(_map, controller));
     } catch (error) {
       debugPrint('Cannot update 3D journey line: $error');
+    } finally {
+      _updatingRoute = false;
     }
   }
 
@@ -185,6 +250,8 @@ class DriveMap3DState extends State<DriveMap3D> {
     _routeReady = false;
     _arrowReady = false;
     _lastRouteCount = -1;
+    _lastRoutePoint = null;
+    _cameraGate.reset();
     // Both OpenFreeMap Liberty and Dark use the OpenMapTiles "building"
     // vector source layer. Where OSM has no height, a modest 9m extrusion
     // is an illustration, not a measured real-world building height.
@@ -222,6 +289,8 @@ class DriveMap3DState extends State<DriveMap3D> {
       );
       _routeReady = true;
       _lastRouteCount = widget.routePoints.length;
+      _lastRoutePoint = widget.routePoints.isEmpty
+          ? null : widget.routePoints.last;
     } catch (error) {
       debugPrint('3D route layer not available: $error');
     }
@@ -251,7 +320,7 @@ class DriveMap3DState extends State<DriveMap3D> {
     } catch (error) {
       debugPrint('GPS navigation arrow layer unavailable: $error');
     }
-    if (mounted) _moveToCar();
+    if (mounted) _moveToCar(force: true);
   }
 
   @override
