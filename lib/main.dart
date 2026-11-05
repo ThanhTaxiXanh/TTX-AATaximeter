@@ -571,7 +571,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
               position.heading <= 360 && position.speed > 1.5) {
             _headingDegrees = position.heading;
           }
-          _gpsStatus = 'GPS nền ±'
+          _gpsStatus = 'GPS nền ±' +
               position.accuracy.toStringAsFixed(0) + ' m';
         });
         // Also advance on each valid fix: Android may throttle Dart timers
