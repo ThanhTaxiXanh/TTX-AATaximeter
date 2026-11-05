@@ -43,7 +43,9 @@ class TripSessionSnapshot {
     routePoints: List<TripRoutePoint>.unmodifiable(routePoints),
   );
 
-  String encode() => jsonEncode({
+  /// Existing full snapshot encoding remains readable for legacy records,
+  /// export, tests and completed trip receipts.
+  Map<String, dynamic> toJson({bool includeRoute = true}) => {
     'schema': 1,
     'meter': meter,
     'tariff': jsonDecode(TariffCodec.encode(tariff)),
@@ -52,8 +54,23 @@ class TripSessionSnapshot {
     'vehicleType': vehicleType, 'vehiclePlate': vehiclePlate,
     'vehicleBrand': vehicleBrand,
     'fareProfileName': fareProfileName,
-    'routePoints': routePoints.map((p) => p.toJson()).toList(),
-  });
+    'routePoints': includeRoute
+        ? routePoints.map((p) => p.toJson()).toList() : <Object>[],
+  };
+
+  String encode() => jsonEncode(toJson());
+
+  /// Version 3 stores accepted GPS points separately in ordered SQLite rows.
+  /// The lightweight checkpoint includes a row-count guard to detect a
+  /// truncated/corrupted route before resuming. The receipt schema is intact.
+  String encodeSqliteHeader({required int routeCount}) {
+    if (routeCount < 0) throw ArgumentError.value(routeCount, 'routeCount');
+    return jsonEncode({
+      ...toJson(includeRoute: false),
+      'routeStorage': 'sqlite-v3',
+      'routeCount': routeCount,
+    });
+  }
 
   factory TripSessionSnapshot.decode(String json) {
     final root = jsonDecode(json);
