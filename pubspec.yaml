@@ -1,7 +1,7 @@
 name: ttx_aataximeter
 description: TTX AATaximeter - clean-room Flutter/Dart taximeter MVP.
 publish_to: none
-version: 0.9.0+20
+version: 0.9.1+21
 
 environment:
   sdk: '>=3.11.0 <4.0.0'
