@@ -1552,19 +1552,11 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     final active = status == MeterStatus.running ||
         status == MeterStatus.paused;
     if (status == MeterStatus.idle) {
-      return Column(children: [
-        SizedBox(width: double.infinity,
-          child: DriverProAction(
-            label: 'Bắt đầu', icon: Icons.play_arrow_rounded,
-            color: DriverProColors.green, darkText: true,
-            onPressed: _storageReady ? _start : null)),
-        const SizedBox(height: 4),
-        TextButton.icon(
-          onPressed: _storageReady ? _flatFareDialog : null,
-          icon: const Icon(Icons.calculate_outlined, size: 17),
-          label: const Text('Báo giá chuyến đi / giá trọn gói'),
-        ),
-      ]);
+      return SizedBox(width: double.infinity,
+        child: DriverProAction(
+          label: 'Bắt đầu', icon: Icons.play_arrow_rounded,
+          color: DriverProColors.green, darkText: true,
+          onPressed: _storageReady ? _start : null));
     }
     if (active) {
       return Row(children: [
@@ -1717,8 +1709,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     final active = status == MeterStatus.running ||
         status == MeterStatus.paused;
     if (_carPreview) return _buildCarMode();
-    final mapHeight = (MediaQuery.sizeOf(context).height * 0.405)
-        .clamp(280.0, 410.0).toDouble();
+    final mapHeight = (MediaQuery.sizeOf(context).height *
+        (active ? 0.35 : 0.39)).clamp(260.0, 385.0).toDouble();
 
     return Scaffold(
       backgroundColor: DriverProColors.background,
@@ -1839,16 +1831,17 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             _mainFareCard(),
             const SizedBox(height: 8),
             _tripMetrics(status),
-            const SizedBox(height: 10),
-            _primaryTripActions(status),
+            const SizedBox(height: 5),
+            TextButton.icon(
+              onPressed: _storageReady ? _flatFareDialog : null,
+              icon: const Icon(Icons.calculate_outlined, size: 17),
+              label: const Text('Báo giá chuyến đi / giá trọn gói')),
           ] else if (active) ...[
             _mainFareCard(),
             const SizedBox(height: 8),
             _tripMetrics(status),
             const SizedBox(height: 7),
             _botQuickAction(),
-            const SizedBox(height: 11),
-            _primaryTripActions(status),
             const SizedBox(height: 9),
             _gpsStatusStrip(status),
             const SizedBox(height: 8),
@@ -1885,8 +1878,6 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             _tripMetrics(status),
             const SizedBox(height: 7),
             _selectedCompanyCard(status),
-            const SizedBox(height: 10),
-            _primaryTripActions(status),
           ],
           if (meter.requiresManualResume)
             const Padding(
@@ -1929,7 +1920,16 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       )),
       bottomNavigationBar: SafeArea(
         top: false,
-        child: NavigationBar(
+        child: Container(
+          decoration: const BoxDecoration(
+            color: DriverProColors.backgroundDeep,
+            border: Border(top: BorderSide(
+              color: DriverProColors.border, width: 0.8))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 1),
+              child: _primaryTripActions(status)),
+            NavigationBar(
           height: 66,
           backgroundColor: DriverProColors.backgroundDeep,
           indicatorColor: const Color(0xFF123A53),
@@ -1951,6 +1951,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
               label: 'Doanh thu',
             ),
           ],
+            ),
+          ]),
         ),
       ),
     );
