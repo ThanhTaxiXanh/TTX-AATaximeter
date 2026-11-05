@@ -5,6 +5,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# The same branch receives push and draft-PR events. Keep only the latest
+# source revision in flight instead of building obsolete APKs in parallel.
+concurrency:
+  group: flutter-mvp-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   test-build:
     runs-on: ubuntu-latest
