@@ -123,12 +123,13 @@ class _DashboardMapState extends State<DashboardMap> {
     });
   }
 
-  void _retryRaster2D() {
+  void _select2DBaseMap() {
     if (widget.is3D) return;
     setState(() {
+      // Invalidate late raster callbacks before changing the source.
       _rasterTileEpoch++;
       _tileFailover.reset();
-      _vector2DFallback = false;
+      _vector2DFallback = !_vector2DFallback;
       _ready = false;
       _follow = true;
     });
@@ -330,21 +331,23 @@ class _DashboardMapState extends State<DashboardMap> {
                   fontWeight: FontWeight.bold)),
             ),
           )),
-        if (_vector2DFallback && !widget.is3D)
+        if (!widget.is3D)
           Positioned(left: 8, top: 45,
             child: Material(
               color: const Color(0xDF10202E),
               borderRadius: BorderRadius.circular(8),
               child: InkWell(
-                onTap: _retryRaster2D,
+                onTap: _select2DBaseMap,
                 borderRadius: BorderRadius.circular(8),
                 child: const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.refresh, color: Colors.cyanAccent, size: 15),
-                    SizedBox(width: 4),
-                    Text('Thử lại nền OSM', style: TextStyle(
-                      color: Colors.white, fontSize: 10)),
+                    Icon(_vector2DFallback ? Icons.refresh : Icons.layers,
+                      color: Colors.cyanAccent, size: 15),
+                    const SizedBox(width: 4),
+                    Text(_vector2DFallback ? 'Thử lại OSM' : 'Đổi nền 2D',
+                      style: const TextStyle(
+                        color: Colors.white, fontSize: 10)),
                   ]),
                 ),
               ),
