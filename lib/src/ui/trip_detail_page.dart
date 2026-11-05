@@ -183,6 +183,9 @@ class TripDetailPage extends StatelessWidget {
           TripRouteMap(points: record.routePoints),
           const SizedBox(height: 17),
           _information(Icons.local_taxi, 'Loại xe / Bảng giá', profile),
+          if (record.vehicleBrand.isNotEmpty)
+            _information(Icons.directions_car_outlined,
+              'Hãng xe', record.vehicleBrand),
           if (record.vehiclePlate.isNotEmpty)
             _information(Icons.confirmation_number_outlined,
               'Biển số xe', record.vehiclePlate),

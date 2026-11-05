@@ -21,6 +21,7 @@ class TripRecord {
     required this.id, required this.receipt,
     this.pickup = '', this.dropoff = '',
     this.vehicleType = '', this.vehiclePlate = '',
+    this.vehicleBrand = '',
     this.fareProfileName = '', this.tariffSnapshot,
     this.paymentMethod = PaymentMethod.cash,
     this.routePoints = const [],
@@ -28,7 +29,7 @@ class TripRecord {
   final String id;
   final TripReceipt receipt;
   final String pickup, dropoff;
-  final String vehicleType, vehiclePlate, fareProfileName;
+  final String vehicleType, vehiclePlate, vehicleBrand, fareProfileName;
   final TariffConfig? tariffSnapshot;
   final PaymentMethod paymentMethod;
   final List<TripRoutePoint> routePoints;
@@ -36,6 +37,7 @@ class TripRecord {
   TripRecord copyWith({PaymentMethod? paymentMethod}) => TripRecord(
     id: id, receipt: receipt, pickup: pickup, dropoff: dropoff,
     vehicleType: vehicleType, vehiclePlate: vehiclePlate,
+    vehicleBrand: vehicleBrand,
     fareProfileName: fareProfileName, tariffSnapshot: tariffSnapshot,
     paymentMethod: paymentMethod ?? this.paymentMethod,
     routePoints: routePoints,
@@ -44,12 +46,14 @@ class TripRecord {
   factory TripRecord.fromReceipt(TripReceipt receipt,
       {String pickup = '', String dropoff = '',
        String vehicleType = '', String vehiclePlate = '',
+       String vehicleBrand = '',
        String fareProfileName = '', TariffConfig? tariffSnapshot,
        List<TripRoutePoint> routePoints = const []}) => TripRecord(
     id: receipt.startedAt.microsecondsSinceEpoch.toString() +
         '-' + receipt.endedAt.microsecondsSinceEpoch.toString(),
     receipt: receipt, pickup: pickup, dropoff: dropoff,
     vehicleType: vehicleType, vehiclePlate: vehiclePlate,
+    vehicleBrand: vehicleBrand,
     fareProfileName: fareProfileName, tariffSnapshot: tariffSnapshot,
     routePoints: List<TripRoutePoint>.unmodifiable(routePoints),
   );
@@ -58,6 +62,7 @@ class TripRecord {
     'version': 3, 'id': id, 'receipt': receipt.toJson(),
     'pickup': pickup, 'dropoff': dropoff,
     'vehicleType': vehicleType, 'vehiclePlate': vehiclePlate,
+    'vehicleBrand': vehicleBrand,
     'fareProfileName': fareProfileName,
     'tariff': tariffSnapshot == null
         ? null : jsonDecode(TariffCodec.encode(tariffSnapshot!)),
@@ -108,6 +113,7 @@ class TripRecord {
       dropoff: json['dropoff']?.toString() ?? '',
       vehicleType: json['vehicleType']?.toString() ?? '',
       vehiclePlate: json['vehiclePlate']?.toString() ?? '',
+      vehicleBrand: json['vehicleBrand']?.toString() ?? '',
       fareProfileName: json['fareProfileName']?.toString() ?? '',
       tariffSnapshot: json['tariff'] is Map
           ? TariffCodec.decode(jsonEncode(json['tariff'])) : null,

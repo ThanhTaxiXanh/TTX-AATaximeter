@@ -22,12 +22,14 @@ void main() {
     final record = TripRecord.fromReceipt(
       m.finish(at: start.add(const Duration(minutes: 45))),
       pickup: 'Bến xe', dropoff: 'Sân bay',
-      vehicleType: 'Xe 4 Chỗ', vehiclePlate: '98G-001.07',
+      vehicleType: 'Xe 5 chỗ', vehiclePlate: '98G-001.07',
+      vehicleBrand: 'VinFast',
       fareProfileName: 'Taxi Hương Giang', tariffSnapshot: tariff,
     );
     final decoded = TripRecord.decode(record.encode());
     expect(decoded.vehiclePlate, '98G-001.07');
-    expect(decoded.vehicleType, 'Xe 4 Chỗ');
+    expect(decoded.vehicleType, 'Xe 5 chỗ');
+    expect(decoded.vehicleBrand, 'VinFast');
     expect(decoded.fareProfileName, 'Taxi Hương Giang');
     expect(decoded.tariffSnapshot!.baseFare, 30000);
     final breakdown = calculateFareBreakdown(
@@ -39,6 +41,7 @@ void main() {
         decoded.receipt.baseFare + decoded.receipt.distanceFare);
     final paid = decoded.copyWith(paymentMethod: PaymentMethod.card);
     expect(paid.vehiclePlate, decoded.vehiclePlate);
+    expect(paid.vehicleBrand, 'VinFast');
     expect(paid.tariffSnapshot!.fareTiers!.length, 2);
   });
 
@@ -47,11 +50,13 @@ void main() {
     m.start(at: start);
     final s = TripSessionSnapshot.fromEngine(m,
       pickup: 'A', dropoff: 'B', vehicleType: 'Xe 7 Chỗ',
-      vehiclePlate: '99A-123.45', fareProfileName: 'Cấu hình B',
+      vehiclePlate: '99A-123.45', vehicleBrand: 'Toyota',
+      fareProfileName: 'Cấu hình B',
     );
     final restored = TripSessionSnapshot.decode(s.encode());
     expect(restored.vehicleType, 'Xe 7 Chỗ');
     expect(restored.vehiclePlate, '99A-123.45');
+    expect(restored.vehicleBrand, 'Toyota');
     expect(restored.fareProfileName, 'Cấu hình B');
     expect(restored.restore(at: start.add(const Duration(hours: 2)))
         .requiresManualResume, isTrue);
@@ -64,6 +69,7 @@ void main() {
       at: start.add(const Duration(minutes: 3))));
     final restored = TripRecord.decode(old.encode());
     expect(restored.vehiclePlate, '');
+    expect(restored.vehicleBrand, '');
     expect(restored.tariffSnapshot, isNull);
   });
 }

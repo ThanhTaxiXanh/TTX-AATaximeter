@@ -76,6 +76,8 @@ class _TripReceiptDialogState extends State<TripReceiptDialog> {
                     fontWeight: FontWeight.bold)),
               if (widget.record.vehicleType.isNotEmpty)
                 Text('Loại xe: ' + widget.record.vehicleType),
+              if (widget.record.vehicleBrand.isNotEmpty)
+                Text('Hãng xe: ' + widget.record.vehicleBrand),
               if (widget.record.vehiclePlate.isNotEmpty)
                 Text('Biển số: ' + widget.record.vehiclePlate),
               if (widget.record.pickup.isNotEmpty)

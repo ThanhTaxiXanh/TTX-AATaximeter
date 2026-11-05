@@ -12,6 +12,7 @@ class TripSessionSnapshot {
     required this.pickup,
     required this.dropoff,
     this.vehicleType = '', this.vehiclePlate = '',
+    this.vehicleBrand = '',
     this.fareProfileName = '',
     this.routePoints = const [],
   });
@@ -20,7 +21,7 @@ class TripSessionSnapshot {
   final TariffConfig tariff;
   final String pickup;
   final String dropoff;
-  final String vehicleType, vehiclePlate, fareProfileName;
+  final String vehicleType, vehiclePlate, vehicleBrand, fareProfileName;
   final List<TripRoutePoint> routePoints;
 
   factory TripSessionSnapshot.fromEngine(
@@ -28,6 +29,7 @@ class TripSessionSnapshot {
     String pickup = '',
     String dropoff = '',
     String vehicleType = '', String vehiclePlate = '',
+    String vehicleBrand = '',
     String fareProfileName = '',
     List<TripRoutePoint> routePoints = const [],
   }) => TripSessionSnapshot(
@@ -36,6 +38,7 @@ class TripSessionSnapshot {
     pickup: pickup,
     dropoff: dropoff,
     vehicleType: vehicleType, vehiclePlate: vehiclePlate,
+    vehicleBrand: vehicleBrand,
     fareProfileName: fareProfileName,
     routePoints: List<TripRoutePoint>.unmodifiable(routePoints),
   );
@@ -47,6 +50,7 @@ class TripSessionSnapshot {
     'pickup': pickup,
     'dropoff': dropoff,
     'vehicleType': vehicleType, 'vehiclePlate': vehiclePlate,
+    'vehicleBrand': vehicleBrand,
     'fareProfileName': fareProfileName,
     'routePoints': routePoints.map((p) => p.toJson()).toList(),
   });
@@ -65,6 +69,7 @@ class TripSessionSnapshot {
       dropoff: root['dropoff']?.toString() ?? '',
       vehicleType: root['vehicleType']?.toString() ?? '',
       vehiclePlate: root['vehiclePlate']?.toString() ?? '',
+      vehicleBrand: root['vehicleBrand']?.toString() ?? '',
       fareProfileName: root['fareProfileName']?.toString() ?? '',
       routePoints: root['routePoints'] is List
           ? (root['routePoints'] as List).map((p) =>

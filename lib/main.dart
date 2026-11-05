@@ -99,6 +99,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   String _tripDropoff = '';
   String _tripVehicleType = '';
   String _tripVehiclePlate = '';
+  String _tripVehicleBrand = '';
   String _tripFareProfileName = '';
   final TextEditingController _destinationController = TextEditingController();
   Timer? _ticker;
@@ -181,6 +182,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         _tripDropoff = restored.dropoff;
         _tripVehicleType = restored.vehicleType;
         _tripVehiclePlate = restored.vehiclePlate;
+        _tripVehicleBrand = restored.vehicleBrand;
         _tripFareProfileName = restored.fareProfileName;
         _routePoints.addAll(restored.routePoints);
         _routeSegment = _routePoints.isEmpty ? 0 :
@@ -201,7 +203,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         unawaited(_initialLocationSetup(
-          needsVehicle: registration == null,
+          needsVehicle: registration == null || registration.needsDetails,
         ));
       });
     } catch (error) {
@@ -589,6 +591,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     meter, pickup: _tripPickup, dropoff: _tripDropoff,
     vehicleType: _tripVehicleType,
     vehiclePlate: _tripVehiclePlate,
+    vehicleBrand: _tripVehicleBrand,
     fareProfileName: _tripFareProfileName,
     routePoints: _routePoints,
   ).encode();
@@ -597,6 +600,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   void _captureTripMetadata() {
     _tripVehicleType = _vehicle?.category.label ?? '';
     _tripVehiclePlate = _vehicle?.plate ?? '';
+    _tripVehicleBrand = _vehicle?.brand ?? '';
     _tripFareProfileName = _tariffCatalog.active.label;
   }
 
@@ -636,7 +640,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
 
   Future<void> _start() async {
     if (meter.status != MeterStatus.idle || !_storageReady) return;
-    if (_vehicle == null && !await _configureVehicle()) return;
+    if ((_vehicle == null || _vehicle!.needsDetails) &&
+        !await _configureVehicle()) return;
     if (!mounted || meter.status != MeterStatus.idle) return;
     if (!await _requestLocationReady()) return;
     if (!mounted || !_appVisible || meter.status != MeterStatus.idle) return;
@@ -682,6 +687,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       pickup: _tripPickup, dropoff: _tripDropoff,
       vehicleType: _tripVehicleType,
       vehiclePlate: _tripVehiclePlate,
+      vehicleBrand: _tripVehicleBrand,
       fareProfileName: _tripFareProfileName,
       tariffSnapshot: meter.tariff,
       routePoints: _routePoints);
@@ -731,7 +737,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       _notify('Hoàn thành chuyến hiện tại và chờ dữ liệu sẵn sàng trước khi báo giá');
       return;
     }
-    if (_vehicle == null && !await _configureVehicle()) return;
+    if ((_vehicle == null || _vehicle!.needsDetails) &&
+        !await _configureVehicle()) return;
     if (!mounted || meter.status != MeterStatus.idle) return;
     final quote = await showDialog<QuoteResult>(
       context: context,
@@ -1074,7 +1081,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       await store.setString('ttx_vehicle_v1', registration.encode());
       if (!mounted) return false;
       setState(() => _vehicle = registration);
-      _notify('Đã lưu thông tin xe: ' + registration.plate);
+      _notify('Đã lưu xe ' + registration.brand + ': ' + registration.plate);
       return true;
     } catch (error) {
       if (mounted) _notify('Không lưu được thông tin xe: ' + error.toString());
