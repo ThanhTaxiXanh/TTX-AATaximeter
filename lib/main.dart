@@ -580,7 +580,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         meter.status == MeterStatus.paused;
     if (active) {
       final now = DateTime.now();
-      setState(() {
+      _applyVisibleState(() {
         meter.skipUntrustedInterval(now);
         meter.suspendForInterruption(at: now);
         _gpsStatus = reason;
@@ -590,36 +590,52 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     unawaited(_stopGps());
   }
 
+  /// Keep processing GPS while backgrounded without rebuilding the hidden
+  /// widget tree. Billing, route storage and checkpoints are unchanged.
+  void _applyVisibleState(VoidCallback update) {
+    if (!mounted) return;
+    if (_appVisible) {
+      setState(update);
+    } else {
+      update();
+    }
+  }
+
   void _meterTick(DateTime now) {
     // A manual pause may accrue waiting, but only with reliable GPS.
     // An interruption never adds distance, elapsed time or waiting charges.
     final active = meter.status == MeterStatus.running ||
         meter.status == MeterStatus.paused;
     if (!active) return;
+    final elapsedBefore = meter.elapsedSeconds;
+    final waitingBefore = meter.waitingSeconds;
+    final speedBefore = meter.speedKmh;
+    final gpsStatusBefore = _gpsStatus;
+
     if (!meter.requiresManualResume && _trackingPolicy.shouldSuspend(now)) {
-      // Keep the foreground location subscription alive. Canceling it here
-      // makes a brief Android screen-off GPS gap permanently stop the ride.
+      // Keep the foreground location subscription alive; no fabricated
+      // mileage, waiting or fare during Android GPS blackouts.
       if (_gps == null) {
         _suspendForGps('Dịch vụ GPS đã dừng: tạm ngắt tính cước');
         return;
       }
-      setState(() {
-        meter.skipUntrustedInterval(now);
-        _gpsStatus = 'GPS gián đoạn: đang chờ tín hiệu, không cộng cước';
-      });
-      _checkpoint();
-      return;
+      meter.skipUntrustedInterval(now);
+      _gpsStatus = 'GPS gián đoạn: đang chờ tín hiệu, không cộng cước';
+    } else if (meter.requiresManualResume ||
+        _trackingPolicy.hasRecentFix(now)) {
+      meter.tick(now);
+    } else {
+      meter.skipUntrustedInterval(now);
     }
-    setState(() {
-      if (meter.requiresManualResume) {
-        meter.tick(now);
-      } else if (_trackingPolicy.hasRecentFix(now)) {
-        meter.tick(now);
-      } else {
-        // Do not charge an unobserved interval in either RUNNING or PAUSED.
-        meter.skipUntrustedInterval(now);
-      }
-    });
+
+    // GPS may deliver several fixes in one second, yet the meter clock
+    // advances only on whole seconds. Avoid rebuilding an unchanged view.
+    if (_appVisible && mounted &&
+        (meter.elapsedSeconds != elapsedBefore ||
+         meter.waitingSeconds != waitingBefore ||
+         meter.speedKmh != speedBefore || _gpsStatus != gpsStatusBefore)) {
+      setState(() {});
+    }
     _checkpoint();
   }
 
@@ -675,8 +691,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           timestamp: position.timestamp,
         );
         if (!meter.isValidGpsObservation(fix)) {
-          if (meter.status == MeterStatus.running) {
-            setState(() => _gpsStatus = 'GPS yếu / sai số: đang chờ tín hiệu');
+          if (meter.status == MeterStatus.running &&
+              _gpsStatus != 'GPS yếu / sai số: đang chờ tín hiệu') {
+            _applyVisibleState(() =>
+                _gpsStatus = 'GPS yếu / sai số: đang chờ tín hiệu');
           }
           return;
         }
@@ -690,8 +708,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         }
         final accepted = meter.acceptGps(fix);
         if (!accepted) {
-          if (meter.status == MeterStatus.running) {
-            setState(() => _gpsStatus = 'GPS yếu / sai số: đang chờ tín hiệu');
+          if (meter.status == MeterStatus.running &&
+              _gpsStatus != 'GPS yếu / sai số: đang chờ tín hiệu') {
+            _applyVisibleState(() =>
+                _gpsStatus = 'GPS yếu / sai số: đang chờ tín hiệu');
           }
           return;
         }
@@ -712,7 +732,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             ));
           }
         }
-        setState(() {
+        _applyVisibleState(() {
           _mapLat = position.latitude;
           _mapLon = position.longitude;
           if (position.heading.isFinite && position.heading >= 0 &&
@@ -747,6 +767,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         state != AppLifecycleState.paused &&
         state != AppLifecycleState.detached;
     if (state == AppLifecycleState.resumed) {
+      // Refresh once with meter/GPS fixes accumulated while in background.
+      if (mounted) setState(() {});
       if (meter.status == MeterStatus.idle ||
           meter.status == MeterStatus.finished) {
         unawaited(_startPreviewGps());
