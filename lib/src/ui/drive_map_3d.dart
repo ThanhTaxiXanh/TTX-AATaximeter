@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as gl;
 import '../domain/trip_route_point.dart';
 
+/// GPS arrow is a native geo-referenced symbol, not a fixed HUD overlay.
 /// Native MapLibre vector map with pitch, heading-up camera and OSM buildings.
 /// It is mounted only while 3D is requested, keeping the initial 2D path fast.
 class DriveMap3D extends StatefulWidget {
@@ -29,6 +31,7 @@ class DriveMap3DState extends State<DriveMap3D> {
   gl.MapLibreMapController? _map;
   bool _styleReady = false;
   bool _routeReady = false;
+  bool _arrowReady = false;
   int _lastRouteCount = -1;
   double _zoom = 17;
   bool _followCar = true;
@@ -72,6 +75,7 @@ class DriveMap3DState extends State<DriveMap3D> {
     if (oldWidget.dark != widget.dark) {
       _styleReady = false;
       _routeReady = false;
+      _arrowReady = false;
       _lastRouteCount = -1;
       // MapLibreMap changes styleString and recreates style layers.
     }
@@ -79,6 +83,7 @@ class DriveMap3DState extends State<DriveMap3D> {
         oldWidget.latitude != widget.latitude ||
         oldWidget.longitude != widget.longitude ||
         oldWidget.headingDegrees != widget.headingDegrees) {
+      unawaited(_refreshArrow());
       if (_followCar) _moveToCar();
     }
     if (_lastRouteCount != widget.routePoints.length) {
@@ -125,6 +130,17 @@ class DriveMap3DState extends State<DriveMap3D> {
     }));
   }
 
+  Future<void> _refreshArrow() async {
+    final controller = _map;
+    if (controller == null || !mounted || !_arrowReady) return;
+    try {
+      await controller.setGeoJsonSource('ttx-gps-arrow-position',
+        gpsArrowGeoJson(widget.latitude, widget.longitude, _heading));
+    } catch (error) {
+      debugPrint('Cannot update GPS arrow: $error');
+    }
+  }
+
   Map<String, dynamic> _routeGeoJson() {
     final bySegment = <int, List<List<double>>>{};
     for (final point in widget.routePoints) {
@@ -166,6 +182,7 @@ class DriveMap3DState extends State<DriveMap3D> {
     if (controller == null || !mounted) return;
     _styleReady = true;
     _routeReady = false;
+    _arrowReady = false;
     _lastRouteCount = -1;
     // Both OpenFreeMap Liberty and Dark use the OpenMapTiles "building"
     // vector source layer. Where OSM has no height, a modest 9m extrusion
@@ -207,6 +224,32 @@ class DriveMap3DState extends State<DriveMap3D> {
     } catch (error) {
       debugPrint('3D route layer not available: $error');
     }
+    // The arrow is anchored at the true WGS84 GPS fix. The camera can be
+    // aimed ahead of the car independently without changing the GPS position.
+    try {
+      await controller.addImage('ttx-3d-navigation-arrow',
+        await _paintArrowImage(), false, 2);
+      await controller.addGeoJsonSource('ttx-gps-arrow-position',
+        gpsArrowGeoJson(widget.latitude, widget.longitude, _heading));
+      await controller.addSymbolLayer(
+        'ttx-gps-arrow-position', 'ttx-gps-arrow',
+        const gl.SymbolLayerProperties(
+          iconImage: 'ttx-3d-navigation-arrow',
+          iconSize: 0.85,
+          iconAnchor: 'center',
+          iconAllowOverlap: true,
+          iconIgnorePlacement: true,
+          // A world-relative GPS heading stays correct during map rotation.
+          iconRotationAlignment: 'map',
+          iconPitchAlignment: 'viewport',
+          iconRotate: ['get', 'heading'],
+        ),
+      );
+      _arrowReady = true;
+      unawaited(_refreshArrow());
+    } catch (error) {
+      debugPrint('GPS navigation arrow layer unavailable: $error');
+    }
     if (mounted) _moveToCar();
   }
 
@@ -228,13 +271,6 @@ class DriveMap3DState extends State<DriveMap3D> {
       onMapCreated: (controller) => _map = controller,
       onStyleLoadedCallback: () => unawaited(_onStyleLoaded()),
     ),
-    // A custom drawn rear-facing blue car: foreground HUD graphic, NOT a
-    // positioned 3D model inside the vector tile renderer.
-    if (_hasFix)
-      const Align(
-        alignment: Alignment(0, 0.67),
-        child: IgnorePointer(child: CarPerspectiveMarker()),
-      ),
     const Positioned(
       bottom: 6, right: 5,
       child: IgnorePointer(child: Text('© OpenStreetMap • OpenFreeMap',
@@ -245,74 +281,89 @@ class DriveMap3DState extends State<DriveMap3D> {
   ]);
 }
 
-/// Lightweight perspective-drawn car with rear lights and a shaded roof.
-class CarPerspectiveMarker extends StatelessWidget {
-  const CarPerspectiveMarker({super.key});
-  @override
-  Widget build(BuildContext context) => SizedBox(
-    width: 80,
-    height: 94,
-    child: CustomPaint(painter: _CarPerspectivePainter()),
-  );
+/// Source coordinates are longitude, latitude in WGS84, not screen pixels.
+/// Exposed for unit tests to prevent regressions to a fake 35m GPS offset.
+Map<String, dynamic> gpsArrowGeoJson(
+    double? latitude, double? longitude, double headingDegrees) {
+  final valid = latitude != null && longitude != null &&
+      latitude.isFinite && longitude.isFinite &&
+      latitude.abs() <= 90 && longitude.abs() <= 180;
+  return {
+    'type': 'FeatureCollection',
+    'features': valid ? [
+      {
+        'type': 'Feature',
+        'geometry': {
+          'type': 'Point',
+          'coordinates': [longitude, latitude],
+        },
+        'properties': {
+          'heading': headingDegrees.isFinite
+              ? ((headingDegrees % 360) + 360) % 360 : 0.0,
+        },
+      }
+    ] : <Object>[],
+  };
 }
 
-class _CarPerspectivePainter extends CustomPainter {
+/// Rasterized once per style load; the arrow has shaded faces and a small
+/// shadow for perspective but remains a light 2D billboard, not a 3D mesh.
+Future<ui.Uint8List> _paintArrowImage() async {
+  const size = Size(92, 106);
+  const pixelRatio = 2.0;
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder)..scale(pixelRatio);
+  const _GpsArrowPainter().paint(canvas, size);
+  final picture = recorder.endRecording();
+  final bitmap = await picture.toImage(
+      (size.width * pixelRatio).round(), (size.height * pixelRatio).round());
+  final data = await bitmap.toByteData(format: ui.ImageByteFormat.png);
+  bitmap.dispose();
+  picture.dispose();
+  if (data == null) throw StateError('Cannot render navigation arrow');
+  return data.buffer.asUint8List();
+}
+
+class _GpsArrowPainter extends CustomPainter {
+  const _GpsArrowPainter();
+
+  Path _poly(List<Offset> points) {
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+    for (final point in points.skip(1)) {
+      path.lineTo(point.dx, point.dy);
+    }
+    return path..close();
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
-    final w = size.width, h = size.height;
-    final shadowPaint = Paint()
-      ..color = const Color(0x66000000)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12);
-    canvas.drawOval(Rect.fromCenter(
-      center: Offset(w / 2, h * .85), width: w * .8, height: 18),
-      shadowPaint);
-
-    Path shape(List<Offset> vertices) {
-      final path = Path()..moveTo(vertices.first.dx, vertices.first.dy);
-      for (final p in vertices.skip(1)) {
-        path.lineTo(p.dx, p.dy);
-      }
-      return path..close();
-    }
-    // Perspective is foreshortened at the top of the car.
-    final shell = shape([
-      Offset(w * .32, h * .12),
-      Offset(w * .68, h * .12),
-      Offset(w * .85, h * .52),
-      Offset(w * .81, h * .83),
-      Offset(w * .19, h * .83),
-      Offset(w * .15, h * .52),
+    const w = 92.0;
+    const h = 106.0;
+    final outline = _poly(const [
+      Offset(46, 8), Offset(82, 85), Offset(49, 67),
+      Offset(46, 74), Offset(43, 67), Offset(10, 85),
     ]);
-    canvas.drawPath(shell, Paint()
+    canvas.drawPath(outline.shift(const Offset(0, 7)),
+      Paint()..color = const Color(0x88020A1D)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8));
+    // Left and right bevels make the arrow read as a raised 3D solid.
+    canvas.drawPath(outline, Paint()
       ..shader = const LinearGradient(
         begin: Alignment.topLeft, end: Alignment.bottomRight,
-        colors: [Color(0xFF79D9FF), Color(0xFF0669D9), Color(0xFF053C85)],
-      ).createShader(Rect.fromLTWH(0, 0, w, h)));
-    canvas.drawPath(shell, Paint()
-      ..color = const Color(0xFFD6F7FF)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.7);
-    final window = shape([
-      Offset(w * .36, h * .23), Offset(w * .64, h * .23),
-      Offset(w * .73, h * .52), Offset(w * .27, h * .52),
-    ]);
-    canvas.drawPath(window, Paint()..color = const Color(0xFF082547));
-    canvas.drawPath(window, Paint()
-      ..color = const Color(0xFF43B7ED)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.4);
-    canvas.drawRRect(RRect.fromRectAndRadius(
-      Rect.fromLTWH(w * .2, h * .72, w * .6, h * .11),
-      const Radius.circular(3)),
-      Paint()..color = const Color(0xFF103A66));
-    for (final x in [w * .20, w * .71]) {
-      canvas.drawRRect(RRect.fromRectAndRadius(
-        Rect.fromLTWH(x, h * .735, w * .09, h * .07),
-        const Radius.circular(2)),
-        Paint()..color = const Color(0xFFFF2634));
-    }
-    canvas.drawRect(Rect.fromLTWH(w * .40, h * .78, w * .2, h * .033),
-      Paint()..color = const Color(0xFFFFD443));
+        colors: [Color(0xFFDCFAFF), Color(0xFF168BEB), Color(0xFF063B92)],
+      ).createShader(const Rect.fromLTWH(10, 8, 72, 80)));
+    canvas.drawPath(_poly(const [
+      Offset(46, 8), Offset(46, 74), Offset(10, 85),
+    ]), Paint()..color = const Color(0xFF9AEAFF));
+    canvas.drawPath(_poly(const [
+      Offset(46, 8), Offset(82, 85), Offset(46, 74),
+    ]), Paint()..color = const Color(0xFF0B66CE));
+    canvas.drawPath(outline, Paint()
+      ..color = const Color(0xFFFBFFFF)
+      ..strokeWidth = 2.4
+      ..style = PaintingStyle.stroke);
+    canvas.drawLine(const Offset(w / 2, 13), const Offset(w / 2, h * .65),
+      Paint()..color = const Color(0xAAEFFFFF)..strokeWidth = 1.3);
   }
 
   @override
