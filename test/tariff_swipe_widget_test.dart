@@ -12,9 +12,9 @@ void main() {
     expect(find.text('Taxi Hương Giang'), findsOneWidget);
     await tester.drag(find.text('Taxi Hương Giang'), const Offset(-180, 0));
     await tester.pumpAndSettle();
-    expect(find.text('Sửa'), findsNWidgets(2));
-    expect(find.text('Xóa'), findsNWidgets(2));
-    await tester.tap(find.text('Xóa').last);
+    expect(find.text('Sửa'), findsOneWidget);
+    expect(find.text('Xóa'), findsOneWidget);
+    await tester.tap(find.text('Xóa'));
     await tester.pumpAndSettle();
     expect(find.text('Xóa bảng giá?'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton, 'Xóa'));
