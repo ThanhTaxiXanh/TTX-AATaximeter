@@ -3,6 +3,8 @@ import 'package:path/path.dart' as path;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import '../domain/trip_record.dart';
+import '../domain/trip_route_point.dart';
+import 'trip_session_snapshot.dart';
 
 /// Transactional storage for completed fares. Never use prefs for critical trips.
 class TripRepository {
@@ -13,7 +15,7 @@ class TripRepository {
     if (_database != null) return _database!;
     final root = await getDatabasesPath();
     _database = await openDatabase(
-      path.join(root, 'ttx_aataximeter_v1.db'), version: 2,
+      path.join(root, 'ttx_aataximeter_v1.db'), version: 3,
       onCreate: (db, version) async {
         await db.execute('''CREATE TABLE trips (
           id TEXT PRIMARY KEY,
@@ -25,9 +27,11 @@ class TripRepository {
         await db.execute(
           'CREATE INDEX trips_started_at_idx ON trips(started_at DESC)');
         await _createSessionTable(db);
+        await _createRouteTable(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) await _createSessionTable(db);
+        if (oldVersion < 3) await _createRouteTable(db);
       },
     );
     return _database!;
@@ -41,26 +45,195 @@ class TripRepository {
     )''');
   }
 
-  /// Atomic checkpoint of the active trip. Called serially by the UI.
-  Future<void> saveActive(String payload) async {
-    final db = await _db;
-    await db.insert('active_trip', {
-      'id': 1,
-      'payload': payload,
-      'updated_at': DateTime.now().toUtc().toIso8601String(),
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  static Future<void> _createRouteTable(DatabaseExecutor db) async {
+    await db.execute('''CREATE TABLE IF NOT EXISTS active_trip_route (
+      sequence INTEGER PRIMARY KEY,
+      latitude REAL NOT NULL,
+      longitude REAL NOT NULL,
+      recorded_at TEXT NOT NULL,
+      accuracy_meters REAL NOT NULL,
+      speed_kmh REAL NOT NULL,
+      segment INTEGER NOT NULL
+    )''');
   }
 
+  static Map<String, Object?> _routeRow(int sequence, TripRoutePoint point) =>
+      {
+        'sequence': sequence,
+        'latitude': point.latitude,
+        'longitude': point.longitude,
+        'recorded_at': point.recordedAt.toIso8601String(),
+        'accuracy_meters': point.accuracyMeters,
+        'speed_kmh': point.speedKmh,
+        'segment': point.segment,
+      };
+
+  static TripRoutePoint _decodeRouteRow(Map<String, Object?> row) =>
+      TripRoutePoint.fromJson({
+        'lat': row['latitude'],
+        'lon': row['longitude'],
+        'at': row['recorded_at'],
+        'accuracy': row['accuracy_meters'],
+        'speed': row['speed_kmh'],
+        'segment': row['segment'],
+      });
+
+  static Future<int> _routeCount(DatabaseExecutor txn) async {
+    final rows = await txn.rawQuery(
+      'SELECT COUNT(*) AS count, MAX(sequence) AS last FROM active_trip_route');
+    final count = rows.first['count'] as int;
+    final last = rows.first['last'] as int?;
+    if (last != null && (last + 1 != count)) {
+      throw const FormatException('Active trip GPS route contains gaps');
+    }
+    return count;
+  }
+
+  /// Older app builds kept all GPS points in active_trip.payload. A v2->v3
+  /// schema migration intentionally leaves that payload untouched; the first
+  /// v3 checkpoint adopts its points in the SAME transaction as the new
+  /// lightweight header. Failure rolls back the entire conversion.
+  static Future<void> _adoptLegacyActive(
+    Transaction txn, String existing, String startedAt,
+  ) async {
+    final decoded = jsonDecode(existing);
+    if (decoded is! Map || decoded['meter'] is! Map) {
+      throw const FormatException('Unrecognized active-trip checkpoint');
+    }
+    final oldMeter = decoded['meter'] as Map;
+    if (oldMeter['startedAt']?.toString() != startedAt) {
+      throw StateError('Different active trip must not replace saved GPS');
+    }
+    if (decoded['routeStorage'] == 'sqlite-v3') return;
+    final legacy = TripSessionSnapshot.decode(existing);
+    for (var i = 0; i < legacy.routePoints.length; i++) {
+      await txn.insert('active_trip_route',
+        _routeRow(i, legacy.routePoints[i]),
+        conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
+  }
+
+  /// Start a new session atomically, never mixing GPS data with a prior trip.
+  /// This is used only after the UI confirms that no active trip is in use.
+  Future<void> beginActive(TripSessionSnapshot snapshot) async {
+    final db = await _db;
+    await db.transaction((txn) async {
+      await txn.delete('active_trip_route');
+      await txn.insert('active_trip', {
+        'id': 1,
+        'payload': snapshot.encodeSqliteHeader(routeCount: 0),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    });
+  }
+
+  /// One atomic write contains the current meter and ONLY NEW GPS points.
+  /// Route indices are stable and INSERT OR IGNORE permits safe retries after
+  /// queued writes fail. Gaps/stale states abort rather than truncate history.
+  Future<void> saveActiveIncremental({
+    required TripSessionSnapshot snapshot,
+    required int routeStartIndex,
+    required List<TripRoutePoint> appendedPoints,
+  }) async {
+    if (routeStartIndex < 0) {
+      throw ArgumentError.value(routeStartIndex, 'routeStartIndex');
+    }
+    final startedAt = snapshot.meter['startedAt']?.toString();
+    if (startedAt == null || startedAt.isEmpty) {
+      throw const FormatException('Missing active-trip start time');
+    }
+    final expectedCount = routeStartIndex + appendedPoints.length;
+    final db = await _db;
+    await db.transaction((txn) async {
+      final existing = await txn.query('active_trip', columns: ['payload'],
+        where: 'id = ?', whereArgs: [1], limit: 1);
+      if (existing.isEmpty) {
+        throw StateError('Active trip disappeared before GPS checkpoint');
+      }
+      await _adoptLegacyActive(
+        txn, existing.first['payload'] as String, startedAt);
+      final currentCount = await _routeCount(txn);
+      if (routeStartIndex > currentCount || currentCount > expectedCount) {
+        throw StateError('GPS checkpoint is stale or missing route samples');
+      }
+      for (var i = 0; i < appendedPoints.length; i++) {
+        final point = appendedPoints[i];
+        // Validate route samples before committing them to crash recovery.
+        TripRoutePoint.fromJson(point.toJson());
+        await txn.insert('active_trip_route',
+          _routeRow(routeStartIndex + i, point),
+          conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
+      final actualCount = await _routeCount(txn);
+      if (actualCount != expectedCount) {
+        throw StateError('GPS checkpoint route sequence is incomplete');
+      }
+      await txn.insert('active_trip', {
+        'id': 1,
+        'payload': snapshot.encodeSqliteHeader(routeCount: actualCount),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    });
+  }
+
+  /// Compatibility for legacy tests/tools that still write full snapshots.
+  /// Never leave orphaned route rows attached to a replacement checkpoint.
+  Future<void> saveActive(String payload) async {
+    final db = await _db;
+    await db.transaction((txn) async {
+      await txn.delete('active_trip_route');
+      await txn.insert('active_trip', {
+        'id': 1,
+        'payload': payload,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    });
+  }
+
+  /// Rehydrate the original snapshot format once on app restart. The UI and
+  /// fare engine need no knowledge of the normalized SQLite route table.
   Future<String?> loadActive() async {
     final db = await _db;
-    final rows = await db.query('active_trip',
-      columns: ['payload'], where: 'id = ?', whereArgs: [1], limit: 1);
-    return rows.isEmpty ? null : rows.first['payload'] as String;
+    return db.transaction((txn) async {
+      final rows = await txn.query('active_trip', columns: ['payload'],
+        where: 'id = ?', whereArgs: [1], limit: 1);
+      if (rows.isEmpty) return null;
+      final payload = rows.first['payload'] as String;
+      final decoded = jsonDecode(payload);
+      if (decoded is! Map || decoded['routeStorage'] != 'sqlite-v3') {
+        // Old snapshots retain their complete inline GPS route.
+        return payload;
+      }
+      final expectedCount = decoded['routeCount'];
+      if (expectedCount is! int || expectedCount < 0) {
+        throw const FormatException('Missing persisted GPS route count');
+      }
+      final saved = await txn.query('active_trip_route',
+        orderBy: 'sequence ASC');
+      if (saved.length != expectedCount) {
+        throw const FormatException('Persisted route count mismatch');
+      }
+      final points = <Map<String, dynamic>>[];
+      for (var i = 0; i < saved.length; i++) {
+        if (saved[i]['sequence'] != i) {
+          throw const FormatException('GPS route ordering gap');
+        }
+        points.add(_decodeRouteRow(saved[i]).toJson());
+      }
+      final full = Map<String, dynamic>.from(decoded);
+      full.remove('routeStorage');
+      full.remove('routeCount');
+      full['routePoints'] = points;
+      return jsonEncode(full);
+    });
   }
 
   Future<void> clearActive() async {
     final db = await _db;
-    await db.delete('active_trip', where: 'id = ?', whereArgs: [1]);
+    await db.transaction((txn) async {
+      await txn.delete('active_trip_route');
+      await txn.delete('active_trip', where: 'id = ?', whereArgs: [1]);
+    });
   }
 
   /// A completed trip and deletion of its checkpoint commit together.
@@ -70,6 +243,7 @@ class TripRepository {
     await db.transaction((txn) async {
       await txn.insert('trips', _row(record),
         conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.delete('active_trip_route');
       await txn.delete('active_trip', where: 'id = ?', whereArgs: [1]);
     });
   }
