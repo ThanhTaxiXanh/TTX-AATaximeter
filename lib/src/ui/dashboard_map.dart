@@ -339,8 +339,8 @@ class _DashboardMapState extends State<DashboardMap> {
               child: InkWell(
                 onTap: _select2DBaseMap,
                 borderRadius: BorderRadius.circular(8),
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
                     Icon(_vector2DFallback ? Icons.refresh : Icons.layers,
                       color: Colors.cyanAccent, size: 15),
