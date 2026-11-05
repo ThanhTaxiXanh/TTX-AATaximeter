@@ -23,7 +23,6 @@ import 'src/ui/trip_history_page.dart';
 import 'src/ui/trip_receipt_dialog.dart';
 import 'src/data/tariff_codec.dart';
 import 'src/data/trip_session_snapshot.dart';
-import 'src/data/async_trip_checkpoint.dart';
 import 'src/domain/tariff_catalog.dart';
 import 'src/ui/tariff_catalog_page.dart';
 import 'src/ui/tariff_settings_dialog.dart';
@@ -95,6 +94,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   String? _startupError;
   final List<TripRoutePoint> _routePoints = [];
   int _routeSegment = 0;
+  // Last successfully committed point count; may lag queued checkpoints.
+  // Retrying from this index is idempotent because SQLite keys points by
+  // sequence. Never advance it before the atomic transaction succeeds.
+  int _persistedRouteCount = 0;
   bool _storageReady = false;
   bool _savingNewTrip = false;
   DateTime _lastCheckpoint = DateTime.fromMillisecondsSinceEpoch(0);
@@ -225,6 +228,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         _tripVehicleBrand = restored.vehicleBrand;
         _tripFareProfileName = restored.fareProfileName;
         _routePoints.addAll(restored.routePoints);
+        // Reconcile a recovered v2 or v3 route in the next transaction.
+        // INSERT OR IGNORE makes the one-time replay safe for either format.
+        _persistedRouteCount = 0;
         _routeSegment = _routePoints.isEmpty ? 0 :
             _routePoints.last.segment + 1;
         _destinationController.text = restored.dropoff;
@@ -790,6 +796,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     }
   }
 
+  /// A checkpoint carries the meter/tariff only. The GPS route is stored as
+  /// ordered SQLite rows instead of being copied/JSON-encoded every 3 seconds.
   TripSessionSnapshot _sessionSnapshot() =>
       TripSessionSnapshot.fromEngine(
     meter, pickup: _tripPickup, dropoff: _tripDropoff,
@@ -797,10 +805,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     vehiclePlate: _tripVehiclePlate,
     vehicleBrand: _tripVehicleBrand,
     fareProfileName: _tripFareProfileName,
-    routePoints: _routePoints,
   );
-
-  String _sessionPayload() => _sessionSnapshot().encode();
 
   /// Freeze vehicle and fare profile at trip start.
   void _captureTripMetadata() {
@@ -818,12 +823,24 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     final now = DateTime.now();
     if (!force && now.difference(_lastCheckpoint).inSeconds < 3) return;
     _lastCheckpoint = now;
-    // Freeze the entire payload at this instant. For long trips the large
-    // route JSON is encoded off the UI isolate without changing its format.
+    // Capture ONLY the new points at the exact same instant as the meter.
+    // If a pending checkpoint fails, the last committed index is unchanged,
+    // and the next checkpoint automatically resends all missing samples.
     final snapshot = _sessionSnapshot();
+    final firstIndex = _persistedRouteCount;
+    final finalIndex = _routePoints.length;
+    final appendedPoints = List<TripRoutePoint>.unmodifiable(
+      _routePoints.sublist(firstIndex, finalIndex));
     _writeQueue = _writeQueue.then((_) async {
-      final data = await encodeTripCheckpoint(snapshot);
-      await repository.saveActive(data);
+      await repository.saveActiveIncremental(
+        snapshot: snapshot,
+        routeStartIndex: firstIndex,
+        appendedPoints: appendedPoints,
+      );
+      if (finalIndex > _persistedRouteCount) {
+        _persistedRouteCount = finalIndex;
+      }
+      _checkpointError = null;
       await CarStateBridge.publish(meter);
     }).catchError((Object error) {
       _checkpointError = error.toString();
@@ -834,7 +851,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     _savingNewTrip = true;
     try {
       await _writeQueue;
-      await repository.saveActive(_sessionPayload());
+      await repository.beginActive(_sessionSnapshot());
+      _persistedRouteCount = 0;
       await CarStateBridge.publish(meter);
       _lastCheckpoint = DateTime.now();
       _checkpointError = null;
@@ -861,6 +879,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     setState(() {
       _routePoints.clear();
       _routeSegment = 0;
+      _persistedRouteCount = 0;
       meter.start(at: now);
     });
     _trackingPolicy.begin(now);
@@ -984,6 +1003,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     setState(() {
       _routePoints.clear();
       _routeSegment = 0;
+      _persistedRouteCount = 0;
       meter.start(at: now, fixedFare: quote.amount);
     });
     _trackingPolicy.begin(now);
