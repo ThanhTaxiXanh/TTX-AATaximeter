@@ -109,10 +109,14 @@ class TripRepository {
     }
     if (decoded['routeStorage'] == 'sqlite-v3') return;
     final legacy = TripSessionSnapshot.decode(existing);
-    for (var i = 0; i < legacy.routePoints.length; i++) {
-      await txn.insert('active_trip_route',
-        _routeRow(i, legacy.routePoints[i]),
-        conflictAlgorithm: ConflictAlgorithm.ignore);
+    if (legacy.routePoints.isNotEmpty) {
+      final batch = txn.batch();
+      for (var i = 0; i < legacy.routePoints.length; i++) {
+        batch.insert('active_trip_route',
+          _routeRow(i, legacy.routePoints[i]),
+          conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
+      await batch.commit(noResult: true);
     }
   }
 
@@ -164,13 +168,18 @@ class TripRepository {
       if (routeStartIndex > currentCount || currentCount > expectedCount) {
         throw StateError('GPS checkpoint is stale or missing route samples');
       }
-      for (var i = 0; i < appendedPoints.length; i++) {
-        final point = appendedPoints[i];
-        // Validate route samples before committing them to crash recovery.
-        TripRoutePoint.fromJson(point.toJson());
-        await txn.insert('active_trip_route',
-          _routeRow(routeStartIndex + i, point),
-          conflictAlgorithm: ConflictAlgorithm.ignore);
+      if (appendedPoints.isNotEmpty) {
+        final batch = txn.batch();
+        for (var i = 0; i < appendedPoints.length; i++) {
+          final point = appendedPoints[i];
+          // Validate route samples before committing them to crash recovery.
+          TripRoutePoint.fromJson(point.toJson());
+          batch.insert('active_trip_route',
+            _routeRow(routeStartIndex + i, point),
+            conflictAlgorithm: ConflictAlgorithm.ignore);
+        }
+        // One native SQLite batch, still enclosed by the transaction.
+        await batch.commit(noResult: true);
       }
       final actualCount = await _routeCount(txn);
       if (actualCount != expectedCount) {
