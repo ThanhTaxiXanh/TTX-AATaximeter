@@ -113,6 +113,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   Timer? _ticker;
   StreamSubscription<Position>? _gps;
   StreamSubscription<Position>? _previewGps;
+  bool _previewGpsStarting = false;
+  int _previewGpsGeneration = 0;
+  DateTime _lastPreviewGpsAttempt = DateTime.fromMillisecondsSinceEpoch(0);
   double _previewSpeedKmh = 0;
   final LocationTrackingPolicy _trackingPolicy = LocationTrackingPolicy();
   bool _gpsStarting = false;
@@ -132,8 +135,23 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     });
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
-      _meterTick(DateTime.now());
+      final now = DateTime.now();
+      _meterTick(now);
+      _retryPreviewGpsIfNeeded(now);
     });
+  }
+
+  /// The preview is a foreground-only map aid, never a billing source.
+  /// After a platform stream error, reattach periodically while idle and
+  /// visible. Do not restart location tracking for a backgrounded activity.
+  void _retryPreviewGpsIfNeeded(DateTime now) {
+    if (!_appVisible || !_storageReady || _gps != null ||
+        _previewGps != null || _previewGpsStarting ||
+        (meter.status != MeterStatus.idle &&
+         meter.status != MeterStatus.finished)) return;
+    if (now.difference(_lastPreviewGpsAttempt) <
+        const Duration(seconds: 15)) return;
+    unawaited(_startPreviewGps());
   }
 
   Future<void> _initializeData() async {
@@ -371,9 +389,13 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
 
   /// Map GPS preview is foreground-only and never calculates fare or route.
   Future<void> _startPreviewGps() async {
-    if (!mounted || !_appVisible || _previewGps != null || _gps != null ||
+    if (!mounted || !_appVisible || _previewGps != null ||
+        _previewGpsStarting || _gps != null ||
         (meter.status != MeterStatus.idle &&
          meter.status != MeterStatus.finished)) return;
+    _previewGpsStarting = true;
+    _lastPreviewGpsAttempt = DateTime.now();
+    final generation = ++_previewGpsGeneration;
     try {
       if (!await Geolocator.isLocationServiceEnabled()) return;
       final permission = await Geolocator.checkPermission();
@@ -390,22 +412,34 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           : const LocationSettings(
               accuracy: LocationAccuracy.high, distanceFilter: 2);
       _previewGps = Geolocator.getPositionStream(
-        locationSettings: settings).listen(_onPreviewFix,
+        locationSettings: settings).listen(
+          (p) {
+            if (generation == _previewGpsGeneration) _onPreviewFix(p);
+          },
           onError: (Object error) {
+            if (generation != _previewGpsGeneration) return;
+            final failed = _previewGps;
             _previewGps = null;
+            if (failed != null) unawaited(failed.cancel());
             if (mounted && _appVisible) {
-              setState(() => _gpsStatus = 'GPS bản đồ: ' + error.toString());
+              setState(() => _gpsStatus = 'GPS bản đồ: $error');
             }
           },
-          onDone: () => _previewGps = null);
+          onDone: () {
+            if (generation == _previewGpsGeneration) _previewGps = null;
+          },
+        );
       final cached = await Geolocator.getLastKnownPosition();
-      if (cached != null && mounted && _previewGps != null &&
+      if (cached != null && mounted &&
+          generation == _previewGpsGeneration && _previewGps != null &&
           _mapLat == null) _onPreviewFix(cached, cached: true);
     } catch (error) {
-      if (mounted && _appVisible) {
-        setState(() => _gpsStatus =
-            'Lỗi GPS bản đồ: ' + error.toString());
+      if (mounted && _appVisible &&
+          generation == _previewGpsGeneration) {
+        setState(() => _gpsStatus = 'Lỗi GPS bản đồ: $error');
       }
+    } finally {
+      _previewGpsStarting = false;
     }
   }
 
@@ -439,6 +473,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   }
 
   Future<void> _stopPreviewGps() async {
+    // Invalidate callbacks from any older stream or async acquisition.
+    _previewGpsGeneration++;
     final previous = _previewGps;
     _previewGps = null;
     _previewSpeedKmh = 0;
@@ -627,35 +663,40 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             meter.status == MeterStatus.finished ||
             meter.status == MeterStatus.idle) return;
         final now = DateTime.now();
-        // Check the old watchdog state BEFORE refreshing it with this fix.
-        // Otherwise a resumed stream could hide a long background GPS gap.
-        if (_trackingPolicy.shouldSuspend(now)) {
-          // A late but fresh, valid fix may resume tracking with a new
-          // baseline. Never bridge a GPS blackout or bill its elapsed time.
-          meter.skipUntrustedInterval(now);
-          _routeSegment++;
-        }
         final age = now.difference(position.timestamp);
-        // A cached or future fix must not refresh the GPS watchdog.
+        // Reject cached / future telemetry BEFORE changing billing or route.
         if (age.isNegative && age.abs() > const Duration(seconds: 3)) return;
         if (age > const Duration(seconds: 12)) return;
-        final firstFix = !_trackingPolicy.hasTrustedFix;
-        if (firstFix) {
-          // The time before GPS lock is unobserved, not billable waiting.
-          meter.skipUntrustedInterval(now);
-        }
-        final accepted = meter.acceptGps(GpsFix(
+        final fix = GpsFix(
           latitude: position.latitude,
           longitude: position.longitude,
           speedKmh: position.speed * 3.6,
           accuracyMeters: position.accuracy,
           timestamp: position.timestamp,
-        ));
+        );
+        if (!meter.isValidGpsObservation(fix)) {
+          if (meter.status == MeterStatus.running) {
+            setState(() => _gpsStatus = 'GPS yếu / sai số: đang chờ tín hiệu');
+          }
+          return;
+        }
+        // Validate first: a rejected GPS sample must never reset the meter
+        // baseline or fragment the recorded route.
+        final recoveredAfterGap = _trackingPolicy.shouldSuspend(now);
+        final firstFix = !_trackingPolicy.hasTrustedFix;
+        if (recoveredAfterGap || firstFix) {
+          // Discard any unobserved distance and waiting time.
+          meter.skipUntrustedInterval(now);
+        }
+        final accepted = meter.acceptGps(fix);
         if (!accepted) {
           if (meter.status == MeterStatus.running) {
             setState(() => _gpsStatus = 'GPS yếu / sai số: đang chờ tín hiệu');
           }
           return;
+        }
+        if (recoveredAfterGap && !firstFix) {
+          _routeSegment++; // New segment only after a valid accepted fix.
         }
         _trackingPolicy.acceptedFix(now);
         if (meter.status == MeterStatus.running) {
