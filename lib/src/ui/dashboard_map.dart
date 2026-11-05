@@ -4,6 +4,7 @@ import 'package:latlong2/latlong.dart' as ll;
 
 import '../domain/trip_route_point.dart';
 import 'drive_map_3d.dart';
+import 'follow_camera_gate.dart';
 import 'raster_tile_failover.dart';
 
 /// Lightweight OSM 2D map by default; native MapLibre only mounts in 3D.
@@ -44,6 +45,8 @@ class _DashboardMapState extends State<DashboardMap> {
   DriveMap3DState? get _activeVectorMap => widget.is3D
       ? _driveKey.currentState : _flatVectorKey.currentState;
   bool _ready = false, _follow = true;
+  final FollowCameraGate _twoDFollowGate =
+      FollowCameraGate(minimumDistanceMeters: 3.0);
   final RasterTileFailover _tileFailover = RasterTileFailover();
   bool _vector2DFallback = false;
   int _rasterTileEpoch = 0;
@@ -68,6 +71,7 @@ class _DashboardMapState extends State<DashboardMap> {
     if (old.is3D != widget.is3D) {
       _ready = false;
       _follow = true;
+      _twoDFollowGate.reset();
     }
     if (!widget.is3D && _ready && _follow && _hasFix &&
         (old.latitude != widget.latitude ||
@@ -75,7 +79,13 @@ class _DashboardMapState extends State<DashboardMap> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _ready && _follow &&
             !widget.is3D && _hasFix) {
-          _map.move(_position, _map.camera.zoom < 11 ? 15 : _map.camera.zoom);
+          final zoom = _map.camera.zoom < 11 ? 15.0 : _map.camera.zoom;
+          if (_twoDFollowGate.shouldUpdate(
+            at: DateTime.now(), latitude: widget.latitude!,
+            longitude: widget.longitude!, bearing: 0, zoom: zoom,
+          )) {
+            _map.move(_position, zoom);
+          }
         }
       });
     }
@@ -91,6 +101,7 @@ class _DashboardMapState extends State<DashboardMap> {
       return;
     }
     setState(() => _follow = true);
+    _twoDFollowGate.reset();
     if (_ready) _map.move(_position, 16);
   }
 
@@ -139,6 +150,7 @@ class _DashboardMapState extends State<DashboardMap> {
       _vector2DFallback = !_vector2DFallback;
       _ready = false;
       _follow = true;
+      _twoDFollowGate.reset();
     });
   }
 
