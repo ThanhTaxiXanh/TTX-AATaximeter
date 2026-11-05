@@ -28,6 +28,7 @@ import 'src/ui/tariff_catalog_page.dart';
 import 'src/ui/tariff_settings_dialog.dart';
 import 'src/ui/dashboard_map.dart';
 import 'src/ui/led_marquee_title.dart';
+import 'src/ui/driver_pro_design.dart';
 import 'src/ui/dashboard_preferences_dialog.dart';
 import 'src/domain/dashboard_preferences.dart';
 import 'src/platform/car_state_bridge.dart';
@@ -59,14 +60,27 @@ class TtxAATaximeterApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'TTX AATaximeter',
+        title: 'TTX Driver Pro',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFFF4BC28),
+            seedColor: DriverProColors.cyan,
             brightness: Brightness.dark,
           ),
-          scaffoldBackgroundColor: const Color(0xFF080C18),
+          scaffoldBackgroundColor: DriverProColors.background,
+          appBarTheme: const AppBarTheme(
+            backgroundColor: DriverProColors.backgroundDeep,
+            foregroundColor: Colors.white,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+          ),
+          navigationBarTheme: NavigationBarThemeData(
+            backgroundColor: DriverProColors.backgroundDeep,
+            indicatorColor: const Color(0xFF0C3550),
+            labelTextStyle: WidgetStateProperty.all(
+              const TextStyle(fontSize: 11,
+                fontWeight: FontWeight.w700, color: Colors.white)),
+          ),
           useMaterial3: true,
         ),
         home: const TaximeterHome(),
