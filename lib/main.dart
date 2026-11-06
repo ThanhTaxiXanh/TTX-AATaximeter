@@ -1164,8 +1164,15 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           Expanded(child: Text(meter.tariff.name,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: Colors.white60))),
-          IconButton(onPressed: () =>
-              setState(() => _carMirror = !_carMirror),
+          IconButton(onPressed: () {
+              final mirrored = !_carMirror;
+              final updated = _dashboardPrefs.copyWith(carHudMirror: mirrored);
+              setState(() {
+                _carMirror = mirrored;
+                _dashboardPrefs = updated;
+              });
+              unawaited(_persistDashboardSettings(updated));
+            },
               tooltip: 'Lật HUD kính lái',
               icon: const Icon(Icons.flip)),
           IconButton(onPressed: () =>
@@ -2549,7 +2556,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         _showQr();
         return;
       case 'car':
-        setState(() => _carPreview = true);
+        setState(() {
+          _carPreview = true;
+          _carMirror = _dashboardPrefs.carHudMirror;
+        });
         return;
       case 'toll':
         _customTollDialog();
