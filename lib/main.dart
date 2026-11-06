@@ -20,6 +20,7 @@ import 'src/data/trip_repository.dart';
 import 'src/data/settings_backup_bundle.dart';
 import 'src/data/unified_backup_bundle.dart';
 import 'src/data/backup_difference_preview.dart';
+import 'src/data/backup_settings_importer.dart';
 import 'src/data/backup_logo_asset.dart';
 import 'src/domain/trip_record.dart';
 import 'src/domain/trip_route_point.dart';
@@ -124,6 +125,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   bool _exportingBackup = false;
   bool _settingsBackupBusy = false;
   bool _unifiedBackupBusy = false;
+  bool _importBackupBusy = false;
   bool _savingNewTrip = false;
   DateTime _lastCheckpoint = DateTime.fromMillisecondsSinceEpoch(0);
   Future<void> _writeQueue = Future<void>.value();
@@ -891,7 +893,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   }
 
   Future<void> _start() async {
-    if (meter.status != MeterStatus.idle || !_storageReady) return;
+    if (meter.status != MeterStatus.idle || !_storageReady ||
+        _importBackupBusy) return;
     if ((_vehicle == null || _vehicle!.needsDetails) &&
         !await _configureVehicle()) return;
     if (!mounted || meter.status != MeterStatus.idle) return;
@@ -2010,6 +2013,187 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     }
   }
 
+  /// Additive, user-confirmed restore from a verified .ttxbackup file.
+  /// No existing receipt, active GPS checkpoint or saved setting is replaced.
+  /// Pre-import safety archives are kept privately in app support storage.
+  Future<void> _importCombinedBackup() async {
+    if (_importBackupBusy || _unifiedBackupBusy ||
+        _exportingBackup || _settingsBackupBusy) return;
+    if (!_storageReady || _savingNewTrip || _pendingUnsaved != null ||
+        meter.status == MeterStatus.running ||
+        meter.status == MeterStatus.paused) {
+      _notify('Hãy kết thúc và lưu chuyến trước khi nhập bản sao.');
+      return;
+    }
+    setState(() => _importBackupBusy = true);
+    Directory? scratch;
+    File? safeSqlite;
+    bool changesMayHaveStarted = false;
+    try {
+      final selected = await FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: const ['ttxbackup']);
+      if (selected == null) return;
+      final fileSize = selected.lengthSync() ?? await selected.length();
+      if (fileSize == null || fileSize <= 0 ||
+          fileSize > UnifiedBackupBundle.maxBundleBytes) {
+        throw const FormatException('Gói sao lưu trống hoặc quá dung lượng');
+      }
+      final bytes = await selected.readAsBytes();
+      if (bytes.length > UnifiedBackupBundle.maxBundleBytes) {
+        throw const FormatException('Gói sao lưu vượt giới hạn');
+      }
+      final archive = UnifiedBackupBundle.decode(bytes);
+      scratch = await (await getTemporaryDirectory())
+          .createTemp('ttx-import-staging-');
+      final extractedDb = File('${scratch.path}/incoming.db');
+      await extractedDb.writeAsBytes(archive.sqliteBytes, flush: true);
+      final inspected = await TripRepository.inspectBackupFile(extractedDb);
+      final live = await repository.inspectCurrentData();
+      if (live.hasActiveTrip) {
+        throw StateError('Máy còn chuyến GPS chưa hoàn tất: không nhập');
+      }
+      final liveSettings = await SettingsBackupBundle.capture(store);
+      final preview = BackupDifferencePreview.compare(
+        archive: inspected,
+        device: live,
+        archiveSettings: archive.settings,
+        deviceSettings: liveSettings);
+      if (preview.archiveOnlyTrips == 0 &&
+          preview.archiveOnlySettings == 0) {
+        _notify('Không có chuyến hoặc cấu hình mới cần nhập. '
+          'Dữ liệu hiện tại được giữ nguyên.');
+        return;
+      }
+      if (!mounted) return;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Nhập bổ sung bản sao lưu'),
+          content: SingleChildScrollView(child: Text(
+            'Gói sao lưu đã qua kiểm tra SHA-256, cấu trúc SQLite và '
+            'hóa đơn.\n\n'
+            'Sẽ bổ sung: ${preview.archiveOnlyTrips} chuyến đi và tối đa '
+            '${preview.archiveOnlySettings} nhóm cấu hình.\n'
+            'Không thay thế: ${preview.changedTripPayloads} hóa đơn '
+            'trùng mã nhưng khác dữ liệu; '
+            '${preview.deviceOnlyTrips} chuyến chỉ có trên máy.\n'
+            'Bỏ qua chuyến chưa hoàn tất trong bản sao: '
+            '${inspected.hasActiveTrip ? "Có" : "Không"}.\n\n'
+            'Chỉ cài đặt các cấu hình chưa có trên máy; không thay '
+            'bảng giá, tài khoản VietQR hay thiết lập hiện hành. '
+            'Logo sẽ nhập nếu danh bạ VietQR còn trống.\n\n'
+            'Trước khi nhập, ứng dụng tạo một bản sao an toàn của '
+            'dữ liệu đang có trong thư mục riêng của ứng dụng. '
+            'Bản sao này KHÔNG được khôi phục tự động khi có lỗi. '
+            'Không thể hoàn tác toàn bộ thao tác bằng một nút. '
+            'Việc nhập lại cùng tệp có thể tiếp tục các mục còn thiếu. '
+            'Bạn cần mở lại ứng dụng để áp dụng cấu hình mới.')),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Hủy')),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Xác nhận nhập bổ sung')),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+
+      await _writeQueue;
+      if (!_storageReady || _savingNewTrip || _pendingUnsaved != null ||
+          meter.status == MeterStatus.running ||
+          meter.status == MeterStatus.paused ||
+          (await repository.inspectCurrentData()).hasActiveTrip) {
+        throw StateError('Trạng thái chuyến thay đổi; đã hủy nhập an toàn');
+      }
+
+      // Persist and verify a private pre-import recovery snapshot FIRST.
+      // Import is non-destructive, but this retains an independent baseline.
+      final support = await getApplicationSupportDirectory();
+      final safetyDir = Directory(
+        '${support.path}/ttx_pre_import_safety');
+      await safetyDir.create(recursive: true);
+      final currentSettings = await SettingsBackupBundle.capture(store);
+      final existingBook = currentSettings
+          .settings['ttx_vietqr_bank_book_v1'];
+      final currentLogos = await BackupLogoCapture.fromBankBook(
+        bankBook: existingBook == null
+            ? const BankBook() : BankBook.decode(existingBook),
+        appSupportDirectory: support);
+      safeSqlite = await repository.createVerifiedBackup(
+        destinationDirectory: scratch);
+      if (await safeSqlite.length() > UnifiedBackupBundle.maxSqliteBytes) {
+        throw StateError('SQLite hiện có lớn hơn 64 MiB; không thể '
+          'tạo bản sao trước khi nhập');
+      }
+      final recovery = UnifiedBackupBundle.fromParts(
+        settings: currentSettings,
+        sqliteBytes: await safeSqlite.readAsBytes(),
+        logos: currentLogos);
+      final checkpoint = File(
+        '${safetyDir.path}/truoc_nhap_'
+        '${DateTime.now().toUtc().microsecondsSinceEpoch}.ttxbackup');
+      await checkpoint.writeAsBytes(recovery.encode(), flush: true);
+      // Check what actually reached storage before modifying any live data.
+      final confirmedCopy = UnifiedBackupBundle.decode(
+        await checkpoint.readAsBytes());
+      if (confirmedCopy.sqliteBytes.isEmpty) {
+        throw const FormatException('Bản sao trước nhập không hợp lệ');
+      }
+
+      changesMayHaveStarted = true;
+      final receipts = await repository.importMissingCompletedTrips(extractedDb);
+      final settings = await BackupSettingsImporter.importMissing(
+        preferences: store,
+        archive: archive.settings,
+        logos: archive.logos,
+        supportDirectory: support);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Đã nhập bổ sung dữ liệu'),
+          content: SingleChildScrollView(child: Text(
+            'Chuyến mới: ${receipts.imported}\n'
+            'Chuyến trùng dữ liệu được bỏ qua: ${receipts.identical}\n'
+            'Hóa đơn trùng mã, khác nội dung (không ghi đè): '
+              '${receipts.conflictsSkipped}\n'
+            'Nhóm cấu hình bổ sung: ${settings.addedKeys}\n'
+            'Nhóm cấu hình có sẵn (không ghi đè): '
+              '${settings.skippedExistingKeys}\n'
+            'Logo VietQR đã lưu: ${settings.restoredLogos}\n'
+            'Chuyến chưa hoàn tất từ bản sao: '
+              '${receipts.unfinishedBackupSkipped ? "Bỏ qua" : "Không có"}\n\n'
+            'Bản sao an toàn trước nhập được giữ trong thư mục '
+            'riêng của ứng dụng. Hãy đóng và mở lại ứng dụng để '
+            'áp dụng các cấu hình mới.')),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Đóng')),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        _notify(changesMayHaveStarted
+          ? 'Nhập có thể mới hoàn tất một phần; dữ liệu cũ không bị '
+            'ghi đè. Có thể nhập lại cùng bản sao: $error'
+          : 'Chưa nhập dữ liệu nào: $error');
+      }
+    } finally {
+      if (safeSqlite != null && await safeSqlite.exists()) {
+        await safeSqlite.delete();
+      }
+      if (scratch != null && await scratch.exists()) {
+        await scratch.delete(recursive: true);
+      }
+      if (mounted) setState(() => _importBackupBusy = false);
+    }
+  }
+
   Future<void> _settingsMenu() async {
     final item = await showModalBottomSheet<String>(
       context: context, showDragHandle: true,
@@ -2031,6 +2215,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           title: const Text('Sao lưu gộp SQLite + cấu hình'),
           subtitle: const Text('Một tệp .ttxbackup có kiểm tra SHA-256'),
           onTap: () => Navigator.pop(context, 'backupCombined')),
+        ListTile(leading: const Icon(Icons.restore_page_outlined),
+          title: const Text('Nhập bản sao lưu (.ttxbackup)'),
+          subtitle: const Text('Bổ sung dữ liệu, không ghi đè chuyến cũ'),
+          onTap: () => Navigator.pop(context, 'importCombined')),
         ListTile(leading: const Icon(Icons.settings_backup_restore_outlined),
           title: const Text('Sao lưu cấu hình (JSON)'),
           subtitle: const Text('Bảng giá, xe, VietQR và bản đồ'),
@@ -2051,6 +2239,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         await _backupSettings();
       case 'backupCombined':
         await _backupCombined();
+      case 'importCombined':
+        await _importCombinedBackup();
     }
   }
 
@@ -2070,6 +2260,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         return;
       case 'backupCombined':
         _backupCombined();
+        return;
+      case 'importCombined':
+        _importCombinedBackup();
         return;
       case 'inspectCombined':
         _inspectCombinedBackup();
@@ -2142,6 +2335,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                 child: Text('Sao lưu cấu hình (JSON)')),
               PopupMenuItem(value: 'backupCombined',
                 child: Text('Sao lưu gộp dữ liệu (.ttxbackup)')),
+              PopupMenuItem(value: 'importCombined',
+                child: Text('Nhập bản sao lưu (.ttxbackup)')),
               PopupMenuItem(value: 'inspectCombined',
                 child: Text('Kiểm tra gói dữ liệu (.ttxbackup)')),
               PopupMenuItem(value: 'inspectSettings',
