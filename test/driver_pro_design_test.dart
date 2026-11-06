@@ -75,6 +75,12 @@ void main() {
     expect(find.byKey(const Key('driver-pro-quote-card')),
       findsOneWidget);
     expect(find.text('Báo giá chuyến đi'), findsOneWidget);
+    final disabledOpacity = find.descendant(
+      of: find.byKey(const Key('driver-pro-quote-card')),
+      matching: find.byType(Opacity),
+    );
+    expect(disabledOpacity, findsOneWidget);
+    expect(tester.widget<Opacity>(disabledOpacity).opacity, 0.55);
     await tester.tap(find.text('Báo giá chuyến đi'));
     expect(tester.takeException(), isNull);
   });
