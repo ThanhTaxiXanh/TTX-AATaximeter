@@ -43,7 +43,15 @@ not a verified measured FPS improvement.
    camera transitions limit redundant native animation while bridging
    sparse GPS updates. Latest-fix coalescing remains in place; route
    drawing and metered GPS storage are not throttled by this UI gate.
-3. **Street-name typography aligned to the screen.** On each MapLibre style
+3. **More frequent native GPS requests.** Both the foreground-only
+   location preview and the trip foreground service now request a
+   **1-second** Android location interval (previously 2 seconds), with
+   a 1m distance filter. Android/GNSS delivery may vary and is not
+   guaranteed to be 1 Hz. Cached preview fixes older than 45 seconds
+   (previously 3 minutes) are no longer used for the initial map anchor.
+   A higher sampling request may consume more battery; fare validation
+   continues to use only the existing trusted-GPS rules.
+4. **Street-name typography aligned to the screen.** On each MapLibre style
    load, the app parses the loaded style and targets the exact road-name
    symbol layers from OpenMapTiles `transportation_name`. It sets
    `text-pitch-alignment: viewport` and
@@ -51,7 +59,7 @@ not a verified measured FPS improvement.
    text halo. This aims to make street names face the phone as the 3D
    map rotates. Other symbols (POIs, shields, one-way arrows, and the
    GPS arrow) retain their original layout and rotation semantics.
-4. **Fail safely.** If an online map provider changes its layer names or
+5. **Fail safely.** If an online map provider changes its layer names or
    a native device refuses a layout property, the map stays available.
    Problems are logged for debugging rather than blocking GPS or fares.
 
