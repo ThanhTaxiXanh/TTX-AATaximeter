@@ -112,7 +112,24 @@ class BackupLogoCapture {
       final ext = path.extension(raw).replaceFirst('.', '').toLowerCase();
       if (path.dirname(resolved) != actualDir ||
           !BackupLogoAsset.allowedExtensions.contains(ext) ||
-          path.basename(resolved) != '${item.key}.$ext') {
+          !(path.basename(resolved) == '${item.key}.$ext' ||
+            RegExp('^${item.key}_restored_[a-f0-9]{24}\\.$ext' + r'
+        throw FormatException(
+          'Đường dẫn logo ${item.key} không thuộc thư mục ứng dụng');
+      }
+      final size = await file.length();
+      if (size <= 0 || size > BackupLogoAsset.maxBytes) {
+        throw FormatException('Logo ${item.key} vượt giới hạn 8 MiB');
+      }
+      found.add(BackupLogoAsset(
+        slot: item.key, extension: ext,
+        bytes: await file.readAsBytes()));
+    }
+    return List<BackupLogoAsset>.unmodifiable(found);
+  }
+}
+)
+                .hasMatch(path.basename(resolved)))) {
         throw FormatException(
           'Đường dẫn logo ${item.key} không thuộc thư mục ứng dụng');
       }
