@@ -63,6 +63,33 @@ void main() {
       ['highway_name_other', 'highway_name_motorway']);
   });
 
+  test('real OpenFreeMap Dark labels and road paints are selected', () {
+    final style = jsonEncode({'layers': [
+      {'id': 'background', 'type': 'background'},
+      {'id': 'highway_name_other', 'type': 'symbol',
+        'source-layer': 'transportation_name'},
+      {'id': 'highway_name_motorway', 'type': 'symbol',
+        'source-layer': 'transportation_name'},
+      {'id': 'highway_minor', 'type': 'line',
+        'source-layer': 'transportation'},
+      {'id': 'highway_major_inner', 'type': 'line',
+        'source-layer': 'transportation'},
+      {'id': 'railway', 'type': 'line',
+        'source-layer': 'transportation'},
+      {'id': 'building', 'type': 'fill',
+        'source-layer': 'building'},
+      {'id': 'highway-shield-non-us', 'type': 'symbol',
+        'source-layer': 'transportation_name'},
+    ]});
+    expect(roadNameSymbolLayerIds(style),
+      ['highway_name_other', 'highway_name_motorway']);
+    final colors = darkRoadLayerColors(style);
+    expect(colors.keys, containsAll(['highway_minor', 'highway_major_inner']));
+    expect(colors.containsKey('railway'), isFalse);
+    expect(colors.containsKey('building'), isFalse);
+    expect(colors['highway_minor'], isNot('#181818'));
+  });
+
   test('unknown provider labels are left untouched, invalid style rejected',
       () {
     expect(roadNameSymbolLayerIds(
