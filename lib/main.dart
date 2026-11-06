@@ -22,6 +22,7 @@ import 'src/data/settings_backup_bundle.dart';
 import 'src/data/unified_backup_bundle.dart';
 import 'src/data/backup_difference_preview.dart';
 import 'src/data/backup_settings_importer.dart';
+import 'src/data/backup_import_postflight.dart';
 import 'src/data/pre_import_backup_vault.dart';
 import 'src/data/backup_logo_asset.dart';
 import 'src/domain/trip_record.dart';
@@ -1245,7 +1246,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     );
   }
 
-  bool get _canChangeFare => meter.status == MeterStatus.idle;
+  bool get _canChangeFare =>
+      meter.status == MeterStatus.idle && !_importBackupBusy;
 
   Future<void> _applyCatalog(TariffCatalog catalog) async {
     if (!_canChangeFare) {
@@ -1351,6 +1353,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   }
 
   void _showHistory() {
+    if (_importBackupBusy) {
+      _notify('Đang nhập bản sao lưu; không mở lịch sử cho đến khi hoàn tất.');
+      return;
+    }
     if (!_storageReady) {
       _notify('Cơ sở dữ liệu chưa sẵn sàng');
       return;
@@ -2166,6 +2172,14 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         if (await pendingCopy.exists()) await pendingCopy.delete();
       }
 
+      // Capture the exact live baseline immediately before beginning writes.
+      // The importer is additive, but it must never report success unless
+      // every existing record remains unchanged and expected data arrived.
+      final beforeImport = await repository.inspectCurrentData();
+      if (beforeImport.hasActiveTrip) {
+        throw StateError('Có chuyến chưa hoàn tất trước khi nhập');
+      }
+      final beforeImportSettings = await SettingsBackupBundle.capture(store);
       changesMayHaveStarted = true;
       final receipts = await repository.importMissingCompletedTrips(extractedDb);
       final settings = await BackupSettingsImporter.importMissing(
@@ -2173,6 +2187,14 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         archive: archive.settings,
         logos: archive.logos,
         supportDirectory: support);
+      final postflight = BackupImportPostflight.verify(
+        before: beforeImport,
+        archive: inspected,
+        after: await repository.inspectCurrentData(),
+        beforeSettings: beforeImportSettings,
+        archiveSettings: archive.settings,
+        afterSettings: await SettingsBackupBundle.capture(store),
+      );
       if (!mounted) return;
       await showDialog<void>(
         context: context,
@@ -2180,10 +2202,12 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           title: const Text('Đã nhập bổ sung dữ liệu'),
           content: SingleChildScrollView(child: Text(
             'Chuyến mới: ${receipts.imported}\n'
+            'Chuyến đã đối soát sau nhập: ${postflight.verifiedNewTrips}\n'
             'Chuyến trùng dữ liệu được bỏ qua: ${receipts.identical}\n'
             'Hóa đơn trùng mã, khác nội dung (không ghi đè): '
               '${receipts.conflictsSkipped}\n'
             'Nhóm cấu hình bổ sung: ${settings.addedKeys}\n'
+            'Nhóm cấu hình đã đối soát: ${postflight.verifiedNewSettings}\n'
             'Nhóm cấu hình có sẵn (không ghi đè): '
               '${settings.skippedExistingKeys}\n'
             'Logo VietQR đã lưu: ${settings.restoredLogos}\n'
@@ -2192,6 +2216,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             'Bản sao an toàn trước nhập được giữ trong thư mục '
             'riêng của ứng dụng. Hãy dùng mục Xuất bản dự phòng '
             'trước khi nhập trong Cài đặt để lưu tệp ra ngoài. '
+            'Đã đối soát lại dữ liệu gốc và dữ liệu vừa nhập. '
             'Đóng và mở lại ứng dụng để áp dụng cấu hình mới.')),
           actions: [
             FilledButton(
@@ -2336,6 +2361,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   }
 
   Future<void> _settingsMenu() async {
+    if (_importBackupBusy) return;
     final item = await showModalBottomSheet<String>(
       context: context, showDragHandle: true,
       builder: (context) => SafeArea(child: Wrap(children: [
@@ -2392,6 +2418,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   }
 
   void _showTools(String choice) {
+    if (_importBackupBusy) return;
     switch (choice) {
       case 'vehicle':
         _configureVehicle();
@@ -2452,7 +2479,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     final mapHeight = (MediaQuery.sizeOf(context).height *
         (active ? 0.35 : 0.39)).clamp(335.0, 405.0).toDouble();
 
-    return Scaffold(
+    return Stack(children: [
+      Scaffold(
       backgroundColor: DriverProColors.background,
       appBar: AppBar(
         toolbarHeight: 56,
@@ -2701,6 +2729,23 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           ]),
         ),
       ),
-    );
+      if (_importBackupBusy)
+        const Positioned.fill(child: Stack(children: [
+          ModalBarrier(
+            dismissible: false,
+            color: Color(0xD50A1320),
+          ),
+          Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            CircularProgressIndicator(color: DriverProColors.cyan),
+            SizedBox(height: 16),
+            Text('Đang kiểm tra và nhập bản sao lưu...',
+              style: TextStyle(
+                color: Colors.white, fontWeight: FontWeight.w700)),
+            SizedBox(height: 6),
+            Text('Không đóng ứng dụng trong lúc nhập dữ liệu.',
+              style: TextStyle(color: Colors.white70, fontSize: 12)),
+          ])),
+        ])),
+    ]);
   }
 }
