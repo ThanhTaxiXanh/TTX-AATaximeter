@@ -31,8 +31,37 @@ class SettingsBackupBundle {
     'ttx_vietqr_account_v1',
   ];
 
+  /// Every persistent user-editable setting currently written by TTX.
+  /// Defaults not explicitly saved are reproducible on a new installation.
+  /// Android permission/onboarding flags are device-only, not portable.
+  static const configurationGroups = <String, List<String>>{
+    'Xe & hồ sơ': ['ttx_vehicle_v1'],
+    'Cước phí & chuyến đi': [
+      'ttx_tariff_v1', 'ttx_tariff_catalog_v1',
+    ],
+    'Bản đồ, lời chào & HUD': [DashboardPreferences.storageKey],
+    'Thanh toán VietQR': [
+      'ttx_vietqr_bank_book_v1', 'ttx_vietqr_account_v1',
+    ],
+  };
+  static const deviceOnlyKeys = <String>{
+    'ttx_location_onboarded_v1',
+    'ttx_background_explained_v1',
+  };
+
   final DateTime exportedAtUtc;
   final Map<String, String> settings;
+
+  /// A readable inventory of precisely what is present in this export.
+  /// A category with no saved key uses built-in defaults on fresh install.
+  Map<String, int> get capturedGroups => Map<String, int>.unmodifiable({
+    for (final section in configurationGroups.entries)
+      section.key: section.value.where(settings.containsKey).length,
+  });
+
+  String get coverageSummary => capturedGroups.entries
+      .map((part) => '${part.key}: ${part.value} mục')
+      .join('\n');
 
   bool get includesVietQr =>
       settings.containsKey('ttx_vietqr_bank_book_v1') ||
@@ -41,6 +70,18 @@ class SettingsBackupBundle {
   static Future<SettingsBackupBundle> capture(
     SharedPreferencesAsync preferences,
   ) async {
+    // Fail closed if a future build adds a user setting but the backup
+    // registry has not been updated. Silently exporting an incomplete
+    // settings archive would be worse than an explicit diagnostic.
+    final allKeys = await preferences.getKeys();
+    final unknown = allKeys.where((key) =>
+        key.startsWith('ttx_') &&
+        !supportedKeys.contains(key) &&
+        !deviceOnlyKeys.contains(key)).toList()..sort();
+    if (unknown.isNotEmpty) {
+      throw FormatException(
+        'Có cài đặt TTX chưa được hỗ trợ sao lưu: ${unknown.join(", ")}');
+    }
     final values = <String, String>{};
     for (final key in supportedKeys) {
       final raw = await preferences.getString(key);
