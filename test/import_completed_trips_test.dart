@@ -161,6 +161,8 @@ void main() {
         afterSettings: SettingsBackupBundle.fromValues(const {}),
       );
       expect(verified.verifiedNewTrips, 1);
+      await target.dispose();
+      target = null; // Inspect raw SQLite only after the repository closes.
       final live = await openDatabase(targetPath);
       try {
         final rows = await live.query('trips', columns: ['payload'],
