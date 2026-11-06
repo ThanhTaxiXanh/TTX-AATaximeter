@@ -2729,6 +2729,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           ]),
         ),
       ),
+      ), // End Scaffold child of the import-blocking Stack.
       if (_importBackupBusy)
         const Positioned.fill(child: Stack(children: [
           ModalBarrier(
