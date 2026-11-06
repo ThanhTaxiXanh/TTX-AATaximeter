@@ -55,6 +55,10 @@ void main() {
         destinationDirectory: folder);
       expect(await backup.exists(), isTrue);
       expect(await backup.length(), greaterThan(0));
+      final inspected = await TripRepository.inspectBackupFile(backup);
+      expect(inspected.completedTripCount, 1);
+      expect(inspected.hasActiveTrip, isTrue);
+      expect(inspected.activeRouteCount, 2);
 
       restored = TripRepository(databasePath: backup.path);
       final history = await restored.listTrips();
