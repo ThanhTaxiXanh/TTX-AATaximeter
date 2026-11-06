@@ -18,6 +18,7 @@ import 'src/ui/fare_breakdown_section.dart';
 import 'src/ui/quote_dialog.dart';
 import 'src/data/trip_repository.dart';
 import 'src/data/settings_backup_bundle.dart';
+import 'src/data/unified_backup_bundle.dart';
 import 'src/domain/trip_record.dart';
 import 'src/domain/trip_route_point.dart';
 import 'src/payment/vietqr.dart';
@@ -120,6 +121,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   bool _storageReady = false;
   bool _exportingBackup = false;
   bool _settingsBackupBusy = false;
+  bool _unifiedBackupBusy = false;
   bool _savingNewTrip = false;
   DateTime _lastCheckpoint = DateTime.fromMillisecondsSinceEpoch(0);
   Future<void> _writeQueue = Future<void>.value();
@@ -1836,6 +1838,144 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     }
   }
 
+  /// A single export-only archive with a SQLite snapshot and preferences.
+  /// Image/logo files and Android permissions are not part of this format.
+  Future<void> _backupCombined() async {
+    if (_unifiedBackupBusy || _exportingBackup || _settingsBackupBusy) return;
+    if (!_storageReady || _savingNewTrip || _pendingUnsaved != null ||
+        meter.status == MeterStatus.running ||
+        meter.status == MeterStatus.paused) {
+      _notify('Hãy kết thúc và lưu chuyến trước khi xuất gói sao lưu.');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Sao lưu gộp dữ liệu TTX'),
+        content: const Text(
+          'Xuất một tệp .ttxbackup gồm SQLite (hóa đơn, lịch sử, GPS) '
+          'và cấu hình JSON (bảng giá, thông tin xe, VietQR, bản đồ). '
+          'Gói có SHA-256 phát hiện lỗi dữ liệu nhưng KHÔNG mã hóa. '
+          'Tài khoản ngân hàng và lịch sử vị trí có thể đọc được, '
+          'nên chỉ lưu ở nơi riêng tư đáng tin cậy. '
+          'Ảnh logo và quyền Android không được đóng gói. '
+          'Chưa có chức năng khôi phục hoặc chuyển chữ ký APK an toàn.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Hủy')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Chọn nơi lưu')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _unifiedBackupBusy = true);
+    File? sqliteCopy;
+    try {
+      await _writeQueue;
+      if (!_storageReady || _savingNewTrip || _pendingUnsaved != null ||
+          meter.status == MeterStatus.running ||
+          meter.status == MeterStatus.paused) {
+        throw StateError('Chuyến chưa hoàn tất hoặc chưa lưu xong');
+      }
+      final preferences = await SettingsBackupBundle.capture(store);
+      sqliteCopy = await repository.createVerifiedBackup(
+        destinationDirectory: await getTemporaryDirectory());
+      if (await sqliteCopy.length() > UnifiedBackupBundle.maxSqliteBytes) {
+        throw StateError('SQLite lớn hơn 64 MiB, chưa hỗ trợ sao lưu gộp');
+      }
+      final bundle = UnifiedBackupBundle.fromParts(
+        settings: preferences,
+        sqliteBytes: await sqliteCopy.readAsBytes());
+      final date = DateTime.now();
+      String two(int n) => n.toString().padLeft(2, '0');
+      final filename = 'TTX_DriverPro_DuLieu_'
+          '${date.year}${two(date.month)}${two(date.day)}_'
+          '${two(date.hour)}${two(date.minute)}${two(date.second)}.ttxbackup';
+      final selected = await FilePicker.saveFile(
+        dialogTitle: 'Xuất dữ liệu chính TTX Driver Pro',
+        fileName: filename,
+        bytes: bundle.encode(),
+      );
+      if (!mounted) return;
+      _notify(selected == null
+        ? 'Đã hủy xuất tệp, dữ liệu trên điện thoại giữ nguyên.'
+        : 'Đã xuất gói dữ liệu. Cất giữ riêng tư và kiểm tra lại tệp.');
+    } catch (error) {
+      if (mounted) _notify('Sao lưu gộp không thành công: $error');
+    } finally {
+      if (sqliteCopy != null && await sqliteCopy.exists()) {
+        await sqliteCopy.delete();
+      }
+      if (mounted) setState(() => _unifiedBackupBusy = false);
+    }
+  }
+
+  /// Read-only preflight of the combined format. Never applies preferences,
+  /// replaces the application's SQLite, or modifies any trip.
+  Future<void> _inspectCombinedBackup() async {
+    if (_unifiedBackupBusy || _exportingBackup || _settingsBackupBusy) return;
+    if (meter.status == MeterStatus.running ||
+        meter.status == MeterStatus.paused) {
+      _notify('Hãy kết thúc chuyến trước khi mở trình kiểm tra sao lưu.');
+      return;
+    }
+    setState(() => _unifiedBackupBusy = true);
+    Directory? scratch;
+    try {
+      final selected = await FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: const ['ttxbackup']);
+      if (selected == null) return;
+      final length = selected.lengthSync() ?? await selected.length();
+      if (length == null || length <= 0 ||
+          length > UnifiedBackupBundle.maxBundleBytes) {
+        throw const FormatException('Gói sao lưu trống hoặc quá 64 MiB');
+      }
+      final bytes = await selected.readAsBytes();
+      if (bytes.length > UnifiedBackupBundle.maxBundleBytes) {
+        throw const FormatException('Gói sao lưu quá lớn');
+      }
+      final bundle = UnifiedBackupBundle.decode(bytes);
+      scratch = await (await getTemporaryDirectory())
+          .createTemp('ttx-backup-inspect-');
+      final candidate = File('${scratch.path}/candidate.db');
+      await candidate.writeAsBytes(bundle.sqliteBytes, flush: true);
+      final verification = await TripRepository.inspectBackupFile(candidate);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Gói sao lưu hợp lệ'),
+          content: Text(
+            'Ngày tạo (UTC): ${bundle.createdAtUtc.toIso8601String()}\n'
+            'Hóa đơn/chuyến đã lưu: ${verification.completedTripCount}\n'
+            'Chuyến đang lưu dở: ${verification.hasActiveTrip ? "Có" : "Không"}\n'
+            'Điểm GPS đang lưu: ${verification.activeRouteCount}\n'
+            'Nhóm cấu hình: ${bundle.settings.settings.length}\n'
+            'Có dữ liệu VietQR: ${bundle.settings.includesVietQr ? "Có" : "Không"}\n\n'
+            'Đã kiểm tra SHA-256 và cấu trúc SQLite. Đây KHÔNG phải '
+            'xác minh tác giả, mã hóa hay thử nghiệm khôi phục. '
+            'Không có dữ liệu nào được nhập vào ứng dụng.'),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Đóng')),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) _notify('Không kiểm tra được gói sao lưu: $error');
+    } finally {
+      if (scratch != null && await scratch.exists()) {
+        await scratch.delete(recursive: true);
+      }
+      if (mounted) setState(() => _unifiedBackupBusy = false);
+    }
+  }
+
   Future<void> _settingsMenu() async {
     final item = await showModalBottomSheet<String>(
       context: context, showDragHandle: true,
@@ -1853,6 +1993,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           title: const Text('Sao lưu lịch sử chuyến (SQLite)'),
           subtitle: const Text('Xuất bản sao an toàn, không ghi đè dữ liệu'),
           onTap: () => Navigator.pop(context, 'backup')),
+        ListTile(leading: const Icon(Icons.inventory_2_outlined),
+          title: const Text('Sao lưu gộp SQLite + cấu hình'),
+          subtitle: const Text('Một tệp .ttxbackup có kiểm tra SHA-256'),
+          onTap: () => Navigator.pop(context, 'backupCombined')),
         ListTile(leading: const Icon(Icons.settings_backup_restore_outlined),
           title: const Text('Sao lưu cấu hình (JSON)'),
           subtitle: const Text('Bảng giá, xe, VietQR và bản đồ'),
@@ -1871,6 +2015,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         await _backupHistory();
       case 'backupSettings':
         await _backupSettings();
+      case 'backupCombined':
+        await _backupCombined();
     }
   }
 
@@ -1887,6 +2033,12 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         return;
       case 'backupSettings':
         _backupSettings();
+        return;
+      case 'backupCombined':
+        _backupCombined();
+        return;
+      case 'inspectCombined':
+        _inspectCombinedBackup();
         return;
       case 'inspectSettings':
         _inspectSettingsBackup();
@@ -1954,6 +2106,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                 child: Text('Sao lưu lịch sử (SQLite)')),
               PopupMenuItem(value: 'backupSettings',
                 child: Text('Sao lưu cấu hình (JSON)')),
+              PopupMenuItem(value: 'backupCombined',
+                child: Text('Sao lưu gộp dữ liệu (.ttxbackup)')),
+              PopupMenuItem(value: 'inspectCombined',
+                child: Text('Kiểm tra gói dữ liệu (.ttxbackup)')),
               PopupMenuItem(value: 'inspectSettings',
                 child: Text('Kiểm tra tệp sao lưu cấu hình')),
               PopupMenuItem(value: 'quote',
