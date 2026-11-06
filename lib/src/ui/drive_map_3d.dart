@@ -8,6 +8,7 @@ import '../domain/trip_route_point.dart';
 import 'follow_camera_gate.dart';
 import 'navigation_camera_filter.dart';
 import 'road_label_style.dart';
+import 'nearest_road_name.dart';
 
 /// GPS arrow is a native geo-referenced symbol, not a fixed HUD overlay.
 /// Native MapLibre vector map with pitch, heading-up camera and OSM buildings.
@@ -23,6 +24,7 @@ class DriveMap3D extends StatefulWidget {
     required this.dark,
     required this.routePoints,
     this.flat2D = false,
+    this.onRoadNameChanged,
   });
   final double? latitude, longitude;
   final double headingDegrees, pitchDegrees, speedKmh;
@@ -30,6 +32,7 @@ class DriveMap3D extends StatefulWidget {
   /// Zero-pitch vector fallback for 2D when raster tiles fail.
   final bool flat2D;
   final List<TripRoutePoint> routePoints;
+  final ValueChanged<String?>? onRoadNameChanged;
 
   @override
   State<DriveMap3D> createState() => DriveMap3DState();
@@ -62,6 +65,8 @@ class DriveMap3DState extends State<DriveMap3D> {
   bool _cameraQueuedForce = false;
   double _zoom = 17;
   bool _followCar = true;
+  DateTime? _lastRoadQuery;
+  bool _roadQueryBusy = false;
 
   bool get _hasFix {
     final lat = widget.latitude, lon = widget.longitude;
@@ -117,6 +122,7 @@ class DriveMap3DState extends State<DriveMap3D> {
       _lastRoutePoint = null;
       _cameraGate.reset();
       _visualCamera.reset();
+      _lastRoadQuery = null;
       // MapLibreMap changes styleString and recreates style layers.
     }
     if (oldWidget.flat2D != widget.flat2D) {
@@ -135,6 +141,10 @@ class DriveMap3DState extends State<DriveMap3D> {
         unawaited(_refreshArrow());
       }
       if (_followCar) _moveToCar();
+      if (oldWidget.latitude != widget.latitude ||
+          oldWidget.longitude != widget.longitude) {
+        unawaited(_updateCurrentRoad());
+      }
     }
     if (_lastRouteCount != widget.routePoints.length ||
         !identical(_lastRoutePoint,
@@ -319,15 +329,33 @@ class DriveMap3DState extends State<DriveMap3D> {
     }
   }
 
-  /// Apply once after each day/night style load. Only names of roads are
-  /// changed; road shields, arrows and POIs retain native map styling.
-  /// Viewport pitch/rotation makes labels face the phone when the car turns.
-  Future<void> _alignStreetLabels(gl.MapLibreMapController controller) async {
+  /// Improve only visible road line and road-name style layers.
+  /// The actual provider Dark style uses grey #505050 road labels and
+  /// near-black roads, which become invisible in tilted night navigation.
+  Future<void> _enhanceRoadStyle(gl.MapLibreMapController controller) async {
     try {
       final style = await controller.getStyle();
       if (style == null || style.isEmpty) return;
-      final names = roadNameSymbolLayerIds(style);
-      for (final id in names) {
+      if (widget.dark) {
+        try {
+          await controller.setLayerProperties('background',
+            const gl.BackgroundLayerProperties(
+              backgroundColor: '#0D1A29'));
+        } catch (error) {
+          debugPrint('Map background cannot be adjusted: $error');
+        }
+        final colors = darkRoadLayerColors(style);
+        for (final entry in colors.entries) {
+          if (!mounted || !_styleReady || !identical(_map, controller)) return;
+          try {
+            await controller.setLayerProperties(
+              entry.key, gl.LineLayerProperties(lineColor: entry.value));
+          } catch (error) {
+            debugPrint('Road contrast ${entry.key}: $error');
+          }
+        }
+      }
+      for (final id in roadNameSymbolLayerIds(style)) {
         if (!mounted || !_styleReady || !identical(_map, controller)) return;
         try {
           await controller.setLayerProperties(
@@ -335,20 +363,46 @@ class DriveMap3DState extends State<DriveMap3D> {
             gl.SymbolLayerProperties(
               textPitchAlignment: 'viewport',
               textRotationAlignment: 'viewport',
-              // Subtle contrast keeps names legible on tilted 3D roads
-              // without altering their source text or placement geometry.
-              textHaloColor: widget.dark ? '#071018' : '#FFFFFF',
-              textHaloWidth: 1.0,
+              textColor: widget.dark ? '#F2F7FF' : '#233E57',
+              textHaloColor: widget.dark ? '#071321' : '#FFFFFF',
+              textHaloWidth: widget.dark ? 1.5 : 1.2,
+              textSize: widget.dark ? 14.0 : 13.0,
             ),
           );
         } catch (error) {
-          debugPrint('Road label layer $id not adjustable: $error');
+          debugPrint('Street label style $id: $error');
         }
       }
     } catch (error) {
-      // Vector map remains functional even if a remote style changes its
-      // layer schema. Never block navigation or GPS for optional labels.
-      debugPrint('Road name alignment not available: $error');
+      // Network tiles and GPS continue even if an external style changes.
+      debugPrint('Optional road styling unavailable: $error');
+    }
+  }
+
+  /// Resolve the nearby named road from currently loaded vector tiles.
+  /// Query at most every 6 seconds, never on each animation frame.
+  Future<void> _updateCurrentRoad({bool force = false}) async {
+    final controller = _map;
+    if (controller == null || !_styleReady || !_hasFix ||
+        _roadQueryBusy || widget.onRoadNameChanged == null) return;
+    final now = DateTime.now();
+    if (!force && _lastRoadQuery != null &&
+        now.difference(_lastRoadQuery!) < const Duration(seconds: 6)) return;
+    _lastRoadQuery = now;
+    _roadQueryBusy = true;
+    try {
+      final features = await controller.querySourceFeatures(
+        'openmaptiles', 'transportation_name', null);
+      if (!mounted || !identical(_map, controller) || !_styleReady) return;
+      final name = nearestRoadName(features,
+        latitude: widget.latitude!,
+        longitude: widget.longitude!,
+        bearingDegrees: widget.speedKmh >= 6 ? _heading : null);
+      widget.onRoadNameChanged?.call(name);
+    } catch (error) {
+      debugPrint('Nearby OSM road name unavailable: $error');
+    } finally {
+      _roadQueryBusy = false;
     }
   }
 
@@ -365,8 +419,9 @@ class DriveMap3DState extends State<DriveMap3D> {
     _lastRoutePoint = null;
     _cameraGate.reset();
     _visualCamera.reset();
+    _lastRoadQuery = null;
+    await _enhanceRoadStyle(controller);
     if (!widget.flat2D) {
-      await _alignStreetLabels(controller);
       // Both OpenFreeMap Liberty and Dark use the OpenMapTiles "building"
       // vector source layer. Where OSM has no height, a modest 9m extrusion
       // is an illustration, not a measured real-world building height.
@@ -437,7 +492,10 @@ class DriveMap3DState extends State<DriveMap3D> {
     } catch (error) {
       debugPrint('GPS navigation arrow layer unavailable: $error');
     }
-    if (mounted) _moveToCar(force: true);
+    if (mounted) {
+      _moveToCar(force: true);
+      unawaited(_updateCurrentRoad(force: true));
+    }
   }
 
   @override
