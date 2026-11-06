@@ -19,6 +19,7 @@ import 'src/ui/quote_dialog.dart';
 import 'src/data/trip_repository.dart';
 import 'src/data/settings_backup_bundle.dart';
 import 'src/data/unified_backup_bundle.dart';
+import 'src/data/backup_difference_preview.dart';
 import 'src/data/backup_logo_asset.dart';
 import 'src/domain/trip_record.dart';
 import 'src/domain/trip_route_point.dart';
@@ -1954,12 +1955,22 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       final candidate = File('${scratch.path}/candidate.db');
       await candidate.writeAsBytes(bundle.sqliteBytes, flush: true);
       final verification = await TripRepository.inspectBackupFile(candidate);
+      // Snapshot currently installed records separately; no values are
+      // imported or overwritten as part of this read-only preview.
+      final device = await repository.inspectCurrentData();
+      final deviceSettings = await SettingsBackupBundle.capture(store);
+      final comparison = BackupDifferencePreview.compare(
+        archive: verification,
+        device: device,
+        archiveSettings: bundle.settings,
+        deviceSettings: deviceSettings,
+      );
       if (!mounted) return;
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Gói sao lưu hợp lệ'),
-          content: Text(
+          title: const Text('Kiểm tra và đối chiếu bản sao'),
+          content: SingleChildScrollView(child: Text(
             'Ngày tạo (UTC): ${bundle.createdAtUtc.toIso8601String()}\n'
             'Hóa đơn/chuyến đã lưu: ${verification.completedTripCount}\n'
             'Chuyến đang lưu dở: ${verification.hasActiveTrip ? "Có" : "Không"}\n'
@@ -1968,8 +1979,20 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             'Có dữ liệu VietQR: ${bundle.settings.includesVietQr ? "Có" : "Không"}\n'
             'Logo VietQR đi kèm: ${bundle.logos.length}\n\n'
             'Đã kiểm tra SHA-256 và cấu trúc SQLite. Đây KHÔNG phải '
-            'xác minh tác giả, mã hóa hay thử nghiệm khôi phục. '
-            'Không có dữ liệu nào được nhập vào ứng dụng.'),
+            'xác minh tác giả, mã hóa hay thử nghiệm khôi phục.\n\n'
+            'ĐỐI CHIẾU VỚI DỮ LIỆU ĐANG CÓ TRÊN MÁY\n'
+            'Chuyến chỉ có trong bản sao: ${comparison.archiveOnlyTrips}\n'
+            'Chuyến chỉ có trên máy: ${comparison.deviceOnlyTrips}\n'
+            'Hóa đơn trùng mã, khác dữ liệu: ${comparison.changedTripPayloads}\n'
+            'Hóa đơn giống nhau: ${comparison.identicalTrips}\n'
+            'Nhóm cấu hình chỉ có trong bản sao: ${comparison.archiveOnlySettings}\n'
+            'Nhóm cấu hình chỉ có trên máy: ${comparison.deviceOnlySettings}\n'
+            'Nhóm cấu hình khác nhau: ${comparison.changedSettings}\n'
+            'Chuyến dở dang trong bản sao: ${comparison.archiveActiveTrip ? "Có" : "Không"}\n'
+            'Chuyến dở dang trên máy: ${comparison.deviceActiveTrip ? "Có" : "Không"}\n\n'
+            'CẢNH BÁO: ${comparison.hasTripConflicts ? "Có dữ liệu trên máy phải bảo vệ" : "Không phát hiện xung đột theo mã chuyến"}'
+            '. Đây chỉ là đánh giá sơ bộ, chưa cấp quyền khôi phục. '
+            'KHÔNG có dữ liệu nào bị thay đổi.')),
           actions: [
             FilledButton(
               onPressed: () => Navigator.pop(ctx),
