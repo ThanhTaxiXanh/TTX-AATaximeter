@@ -1,8 +1,12 @@
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as path;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:ttx_aataximeter/src/data/backup_import_postflight.dart';
+import 'package:ttx_aataximeter/src/data/settings_backup_bundle.dart';
 import 'package:ttx_aataximeter/src/core/taximeter_engine.dart';
 import 'package:ttx_aataximeter/src/data/trip_repository.dart';
 import 'package:ttx_aataximeter/src/data/trip_session_snapshot.dart';
@@ -117,4 +121,59 @@ void main() {
       await root.delete(recursive: true);
     }
   });
+  test('preserves reordered legacy receipt bytes and verifies postflight',
+      () async {
+    final root = await Directory.systemTemp.createTemp('ttx-legacy-json-');
+    final targetPath = path.join(root.path, 'target.db');
+    TripRepository? source;
+    TripRepository? target;
+    try {
+      source = TripRepository(databasePath: path.join(root.path, 'source.db'));
+      target = TripRepository(databasePath: targetPath);
+      final record = receipt(12);
+      await source.save(record);
+      final snapshot = await source.createVerifiedBackup(
+        destinationDirectory: root);
+      final json = Map<String, dynamic>.from(
+        jsonDecode(record.encode()) as Map);
+      final reordered = jsonEncode(
+        Map<String, dynamic>.fromEntries(json.entries.toList().reversed));
+      expect(reordered, isNot(record.encode()));
+      final editableCopy = await openDatabase(snapshot.path);
+      try {
+        await editableCopy.update('trips', {'payload': reordered},
+          where: 'id = ?', whereArgs: [record.id]);
+      } finally {
+        await editableCopy.close();
+      }
+      final before = await target.inspectCurrentData();
+      final archive = await TripRepository.inspectBackupFile(snapshot);
+      final first = await target.importMissingCompletedTrips(snapshot);
+      expect(first.imported, 1);
+      final second = await target.importMissingCompletedTrips(snapshot);
+      expect(second.imported, 0);
+      expect(second.identical, 1);
+      final after = await target.inspectCurrentData();
+      final verified = BackupImportPostflight.verify(
+        before: before, archive: archive, after: after,
+        beforeSettings: SettingsBackupBundle.fromValues(const {}),
+        archiveSettings: SettingsBackupBundle.fromValues(const {}),
+        afterSettings: SettingsBackupBundle.fromValues(const {}),
+      );
+      expect(verified.verifiedNewTrips, 1);
+      final live = await openDatabase(targetPath);
+      try {
+        final rows = await live.query('trips', columns: ['payload'],
+          where: 'id = ?', whereArgs: [record.id]);
+        expect(rows.single['payload'], reordered);
+      } finally {
+        await live.close();
+      }
+    } finally {
+      if (source != null) await source.dispose();
+      if (target != null) await target.dispose();
+      await root.delete(recursive: true);
+    }
+  });
+
 }
