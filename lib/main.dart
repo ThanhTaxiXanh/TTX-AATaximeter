@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
+import 'package:crypto/crypto.dart';
 
 import 'src/core/taximeter_engine.dart';
 import 'src/core/location_tracking_policy.dart';
@@ -23,6 +24,7 @@ import 'src/data/unified_backup_bundle.dart';
 import 'src/data/backup_difference_preview.dart';
 import 'src/data/backup_settings_importer.dart';
 import 'src/data/backup_import_postflight.dart';
+import 'src/data/backup_import_journal.dart';
 import 'src/data/pre_import_backup_vault.dart';
 import 'src/data/backup_logo_asset.dart';
 import 'src/domain/trip_record.dart';
@@ -130,6 +132,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   bool _unifiedBackupBusy = false;
   bool _importBackupBusy = false;
   bool _vaultExportBusy = false;
+  String? _interruptedImportWarning;
   bool _savingNewTrip = false;
   DateTime _lastCheckpoint = DateTime.fromMillisecondsSinceEpoch(0);
   Future<void> _writeQueue = Future<void>.value();
@@ -187,6 +190,33 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     if (now.difference(_lastPreviewGpsAttempt) <
         const Duration(seconds: 15)) return;
     unawaited(_startPreviewGps());
+  }
+
+  /// Loading a journal never imports or rolls back data automatically.
+  /// If a previous import was interrupted, keep a persistent warning
+  /// until the same archive passes the full post-import verification.
+  Future<void> _loadImportJournalStatus() async {
+    try {
+      final entry = await BackupImportJournal.read(
+        await getApplicationSupportDirectory());
+      if (!mounted) return;
+      setState(() {
+        _interruptedImportWarning = entry?.needsReview == true
+            ? 'Có lần nhập bản sao chưa được xác nhận hoàn tất. '
+              'Hãy lưu bản dự phòng trước nhập ra ngoài ứng dụng, '
+              'sau đó chọn lại đúng tệp .ttxbackup để kiểm tra và tiếp tục. '
+              'Ứng dụng không tự ghi đè hoặc hoàn tác dữ liệu.'
+            : null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _interruptedImportWarning =
+            'Không đọc được nhật ký nhập bản sao. '
+            'Dữ liệu hiện có được giữ nguyên; không nên nhập tệp khác '
+            'trước khi kiểm tra bản dự phòng.';
+      });
+    }
   }
 
   Future<void> _initializeData() async {
@@ -290,6 +320,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         _tariffCatalog = catalog;
         _storageReady = true;
       });
+      unawaited(_loadImportJournalStatus());
       if (meter.status != MeterStatus.idle) await _stopPreviewGps();
       unawaited(CarStateBridge.publish(meter));
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2041,6 +2072,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     Directory? scratch;
     File? safeSqlite;
     bool changesMayHaveStarted = false;
+    BackupImportJournalEntry? importJournal;
     try {
       final selected = await FilePicker.pickFile(
         type: FileType.custom,
@@ -2056,6 +2088,14 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         throw const FormatException('Gói sao lưu vượt giới hạn');
       }
       final archive = UnifiedBackupBundle.decode(bytes);
+      final archiveDigest = sha256.convert(bytes).toString();
+      final support = await getApplicationSupportDirectory();
+      final priorJournal = await BackupImportJournal.read(support);
+      if (priorJournal != null && priorJournal.needsReview &&
+          priorJournal.archiveSha256 != archiveDigest) {
+        throw StateError('Có lần nhập dở dang từ bản sao khác. '
+          'Hãy xuất bản dự phòng rồi chọn lại đúng tệp sao lưu trước đó.');
+      }
       scratch = await (await getTemporaryDirectory())
           .createTemp('ttx-import-staging-');
       final extractedDb = File('${scratch.path}/incoming.db');
@@ -2072,7 +2112,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         archiveSettings: archive.settings,
         deviceSettings: liveSettings);
       if (preview.archiveOnlyTrips == 0 &&
-          preview.archiveOnlySettings == 0) {
+          preview.archiveOnlySettings == 0 &&
+          (priorJournal == null || !priorJournal.needsReview)) {
         _notify('Không có chuyến hoặc cấu hình mới cần nhập. '
           'Dữ liệu hiện tại được giữ nguyên.');
         return;
@@ -2125,7 +2166,6 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
 
       // Persist and verify a private pre-import recovery snapshot FIRST.
       // Import is non-destructive, but this retains an independent baseline.
-      final support = await getApplicationSupportDirectory();
       final safetyDir = Directory(
         '${support.path}/ttx_pre_import_safety');
       await safetyDir.create(recursive: true);
@@ -2172,14 +2212,30 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         if (await pendingCopy.exists()) await pendingCopy.delete();
       }
 
-      // Capture the exact live baseline immediately before beginning writes.
-      // The importer is additive, but it must never report success unless
-      // every existing record remains unchanged and expected data arrived.
-      final beforeImport = await repository.inspectCurrentData();
-      if (beforeImport.hasActiveTrip) {
+      // For a retry, compare against the ORIGINAL pre-import snapshot,
+      // not against a snapshot that may already contain partial new data.
+      final baselineName = priorJournal != null && priorJournal.needsReview
+          ? priorJournal.safetyCopyName : path.basename(checkpoint.path);
+      final baselineFile = File(path.join(safetyDir.path, baselineName));
+      if (await FileSystemEntity.type(baselineFile.path,
+              followLinks: false) != FileSystemEntityType.file ||
+          await baselineFile.length() > UnifiedBackupBundle.maxBundleBytes) {
+        throw const FormatException('Bản dự phòng gốc trước nhập không hợp lệ');
+      }
+      final baseline = UnifiedBackupBundle.decode(
+        await baselineFile.readAsBytes());
+      final baselineDb = File('${scratch.path}/baseline.db');
+      await baselineDb.writeAsBytes(baseline.sqliteBytes, flush: true);
+      final originalTrips = await TripRepository.inspectBackupFile(baselineDb);
+      if (originalTrips.hasActiveTrip ||
+          (await repository.inspectCurrentData()).hasActiveTrip) {
         throw StateError('Có chuyến chưa hoàn tất trước khi nhập');
       }
-      final beforeImportSettings = await SettingsBackupBundle.capture(store);
+      // Durable marker must be committed BEFORE any live data writes.
+      importJournal = await BackupImportJournal.begin(
+        support: support,
+        archiveSha256: archiveDigest,
+        safetyCopyName: path.basename(checkpoint.path));
       changesMayHaveStarted = true;
       final receipts = await repository.importMissingCompletedTrips(extractedDb);
       final settings = await BackupSettingsImporter.importMissing(
@@ -2188,13 +2244,18 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         logos: archive.logos,
         supportDirectory: support);
       final postflight = BackupImportPostflight.verify(
-        before: beforeImport,
+        before: originalTrips,
         archive: inspected,
         after: await repository.inspectCurrentData(),
-        beforeSettings: beforeImportSettings,
+        beforeSettings: baseline.settings,
         archiveSettings: archive.settings,
         afterSettings: await SettingsBackupBundle.capture(store),
       );
+      await BackupImportJournal.transition(
+        support: support,
+        expected: importJournal,
+        phase: BackupImportPhase.completed);
+      importJournal = null;
       if (!mounted) return;
       await showDialog<void>(
         context: context,
@@ -2226,6 +2287,16 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         ),
       );
     } catch (error) {
+      if (changesMayHaveStarted && importJournal != null) {
+        try {
+          await BackupImportJournal.transition(
+            support: await getApplicationSupportDirectory(),
+            expected: importJournal,
+            phase: BackupImportPhase.needsReview);
+        } catch (_) {
+          // Leave the previous applying marker intact for crash recovery.
+        }
+      }
       if (mounted) {
         _notify(changesMayHaveStarted
           ? 'Nhập có thể mới hoàn tất một phần; dữ liệu cũ không bị '
@@ -2239,6 +2310,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       if (scratch != null && await scratch.exists()) {
         await scratch.delete(recursive: true);
       }
+      await _loadImportJournalStatus();
       if (mounted) setState(() => _importBackupBusy = false);
     }
   }
@@ -2546,6 +2618,22 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           Center(child: DriverProStatusBanner(
             status: status,
             requiresManualResume: meter.requiresManualResume)),
+          if (_interruptedImportWarning != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8, bottom: 6),
+              child: DriverProPanel(
+                borderColor: DriverProColors.amber,
+                child: ListTile(
+                  leading: const Icon(Icons.warning_amber_rounded,
+                    color: DriverProColors.amber),
+                  title: const Text('Cần kiểm tra lần nhập trước',
+                    style: TextStyle(fontWeight: FontWeight.w800)),
+                  subtitle: Text(_interruptedImportWarning!),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: _importBackupBusy ? null : _importCombinedBackup,
+                ),
+              ),
+            ),
           const SizedBox(height: 1),
           Center(child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 320),
