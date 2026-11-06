@@ -10,6 +10,7 @@ import 'package:ttx_aataximeter/src/data/backup_settings_importer.dart';
 import 'package:ttx_aataximeter/src/data/settings_backup_bundle.dart';
 import 'package:ttx_aataximeter/src/domain/dashboard_preferences.dart';
 import 'package:ttx_aataximeter/src/payment/bank_book.dart';
+import 'package:ttx_aataximeter/src/payment/vietqr.dart';
 
 void main() {
   setUp(() {
@@ -79,39 +80,120 @@ void main() {
     }
   });
 
-  test('import never replaces an existing bank book or map preferences',
-      () async {
+  test('existing bank account remains selected while new archived account '
+      'and missing footer logo are merged safely', () async {
     SharedPreferences.setMockInitialValues({});
     final preferences = SharedPreferencesAsync();
-    await preferences.setString('ttx_vietqr_bank_book_v1',
-      const BankBook().encode());
     final current = const DashboardPreferences(darkMap: false).encode();
     await preferences.setString(DashboardPreferences.storageKey, current);
+    final oldBook = BankBook(
+      accounts: [
+        SavedBankAccount(
+          id: 'device-account',
+          bankName: 'Existing Bank',
+          account: const VietQrAccount(
+            bankBin: '970407', accountNumber: '12345',
+            accountName: 'EXISTING PAYEE')),
+      ],
+      defaultId: 'device-account',
+      centerLogoPath: '/existing/device-center.png',
+    );
+    await preferences.setString(
+      'ttx_vietqr_bank_book_v1', oldBook.encode());
+    final archived = BankBook(
+      accounts: [
+        SavedBankAccount(
+          id: 'archived-account',
+          bankName: 'Archive Bank',
+          account: const VietQrAccount(
+            bankBin: '970407', accountNumber: '67890',
+            accountName: 'ARCHIVE PAYEE')),
+      ],
+      defaultId: 'archived-account',
+    );
     final root = await Directory.systemTemp.createTemp('ttx-keep-existing-');
     try {
       final saved = SettingsBackupBundle.fromValues({
-        'ttx_vietqr_bank_book_v1':
-          const BankBook(centerLogoPath: '/old/center.png').encode(),
+        'ttx_vietqr_bank_book_v1': archived.encode(),
         DashboardPreferences.storageKey:
           const DashboardPreferences(darkMap: true).encode(),
       });
+      final footer = BackupLogoAsset(
+        slot: 'footer', extension: 'png',
+        bytes: Uint8List.fromList(
+          const [137, 80, 78, 71, 13, 10, 26, 10, 5]));
       final result = await BackupSettingsImporter.importMissing(
         preferences: preferences,
         archive: saved,
-        logos: [
-          BackupLogoAsset(
-            slot: 'center', extension: 'png',
-            bytes: Uint8List.fromList(
-              const [137, 80, 78, 71, 13, 10, 26, 10])),
-        ],
+        logos: [footer],
         supportDirectory: root);
       expect(result.addedKeys, 0);
-      expect(result.restoredLogos, 0);
-      expect((await preferences.getString(DashboardPreferences.storageKey)),
+      expect(result.addedBankAccounts, 1);
+      expect(result.updatedBankBook, true);
+      expect(result.restoredLogos, 1);
+      expect(await preferences.getString(DashboardPreferences.storageKey),
         current);
-      expect(BankBook.decode(
-        (await preferences.getString('ttx_vietqr_bank_book_v1'))!)
-          .centerLogoPath, isNull);
+      final merged = BankBook.decode(
+        (await preferences.getString('ttx_vietqr_bank_book_v1'))!);
+      expect(merged.accounts, hasLength(2));
+      expect(merged.accounts.first.id, 'device-account');
+      expect(merged.defaultId, 'device-account');
+      expect(merged.centerLogoPath, oldBook.centerLogoPath);
+      expect(await File(merged.footerLogoPath!).exists(), true);
+      final repeated = await BackupSettingsImporter.importMissing(
+        preferences: preferences,
+        archive: saved,
+        logos: [footer],
+        supportDirectory: root);
+      expect(repeated.addedBankAccounts, 0);
+      expect(repeated.restoredLogos, 0);
+      expect(repeated.updatedBankBook, false);
+    } finally {
+      await root.delete(recursive: true);
+    }
+  });
+
+  test('existing EMPTY bank book no longer prevents restoring VietQR',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = SharedPreferencesAsync();
+    await preferences.setString(
+      'ttx_vietqr_bank_book_v1', const BankBook().encode());
+    final archiveBook = BankBook(
+      accounts: [
+        SavedBankAccount(
+          id: 'backup-1', bankName: 'Saved Bank',
+          account: const VietQrAccount(
+            bankBin: '970407', accountNumber: '123456789',
+            accountName: 'SAVED PAYEE')),
+      ],
+      defaultId: 'backup-1',
+    );
+    final archive = SettingsBackupBundle.fromValues({
+      'ttx_vietqr_bank_book_v1': archiveBook.encode(),
+    });
+    final center = BackupLogoAsset(
+      slot: 'center', extension: 'png',
+      bytes: Uint8List.fromList(
+        const [137, 80, 78, 71, 13, 10, 26, 10, 5]));
+    final footer = BackupLogoAsset(
+      slot: 'footer', extension: 'png',
+      bytes: Uint8List.fromList(
+        const [137, 80, 78, 71, 13, 10, 26, 10, 6]));
+    final root = await Directory.systemTemp.createTemp('ttx-empty-bank-');
+    try {
+      final result = await BackupSettingsImporter.importMissing(
+        preferences: preferences, archive: archive,
+        logos: [center, footer], supportDirectory: root);
+      expect(result.addedKeys, 0); // key existed; entries are new.
+      expect(result.addedBankAccounts, 1);
+      expect(result.restoredLogos, 2);
+      final stored = BankBook.decode(
+        (await preferences.getString('ttx_vietqr_bank_book_v1'))!);
+      expect(stored.accounts, hasLength(1));
+      expect(stored.selected?.id, 'backup-1');
+      expect(await File(stored.centerLogoPath!).exists(), isTrue);
+      expect(await File(stored.footerLogoPath!).exists(), isTrue);
     } finally {
       await root.delete(recursive: true);
     }
