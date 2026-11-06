@@ -116,7 +116,11 @@ class BackupSettingsImporter {
     // Validate before committing one atomic SharedPreferences value.
     final encoded = finalBook.encode();
     await preferences.setString(_bankKey, encoded);
-    if (needsCreate) added++;
+    if (needsCreate) {
+      added++;
+    } else if (skipped > 0) {
+      skipped--; // This existing key received additive VietQR entries.
+    }
     return SettingsImportResult(
       addedKeys: added,
       skippedExistingKeys: skipped,
