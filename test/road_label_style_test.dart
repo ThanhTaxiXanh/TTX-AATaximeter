@@ -90,6 +90,27 @@ void main() {
     expect(colors['highway_minor'], isNot('#181818'));
   });
 
+  test('navy day/night reference recolors real dark surfaces without '
+      'altering POI symbols or navigation arrow', () {
+    final style = jsonEncode({'layers': [
+      {'id': 'background', 'type': 'background'},
+      {'id': 'landuse_residential', 'type': 'fill',
+        'source-layer': 'landuse'},
+      {'id': 'water', 'type': 'fill', 'source-layer': 'water'},
+      {'id': 'building', 'type': 'fill', 'source-layer': 'building'},
+      {'id': 'highway_minor', 'type': 'line',
+        'source-layer': 'transportation'},
+      {'id': 'poi_label', 'type': 'symbol',
+        'source-layer': 'poi'},
+    ]});
+    final surfaces = darkSurfaceLayerColors(style);
+    expect(surfaces['landuse_residential'], '#1B2B49');
+    expect(surfaces['building'], '#344461');
+    expect(surfaces.containsKey('background'), false);
+    expect(surfaces.containsKey('poi_label'), false);
+    expect(darkRoadLayerColors(style)['highway_minor'], '#7E99B9');
+  });
+
   test('unknown provider labels are left untouched, invalid style rejected',
       () {
     expect(roadNameSymbolLayerIds(
