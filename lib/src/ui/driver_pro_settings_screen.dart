@@ -251,9 +251,11 @@ class _DriverProSettingsScreenState extends State<DriverProSettingsScreen> {
               borderSide: const BorderSide(color: DriverProColors.border))),
         ),
         const SizedBox(height: 24),
-        for (final section in sections)
+        for (final section in sections) ...[
           _group(section.$1, section.$2, section.$3),
-        _mapGroup(),
+          if (section.$1 == 'Cước phí & chuyến đi')
+            _mapGroup(),
+        ],
         const Center(child: Text(
           'TTX DRIVER PRO • Phiên bản thử nghiệm',
           style: TextStyle(color: DriverProColors.muted, fontSize: 11))),
