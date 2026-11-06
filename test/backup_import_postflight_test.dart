@@ -4,6 +4,9 @@ import 'package:ttx_aataximeter/src/data/settings_backup_bundle.dart';
 import 'package:ttx_aataximeter/src/data/trip_repository.dart';
 import 'package:ttx_aataximeter/src/domain/dashboard_preferences.dart';
 import 'package:ttx_aataximeter/src/payment/bank_book.dart';
+import 'package:ttx_aataximeter/src/payment/vietqr.dart';
+import 'package:ttx_aataximeter/src/data/backup_logo_asset.dart';
+import 'dart:typed_data';
 
 TripBackupInspection receipts(Map<String, String> values, {
   bool active = false,
@@ -112,5 +115,88 @@ void main() {
       archiveSettings: preferences({}),
       afterSettings: preferences({}),
     ), throwsStateError);
+  });
+
+  test('postflight accepts additive bank account and both recovered logos',
+      () {
+    final archived = BankBook(
+      accounts: [
+        SavedBankAccount(
+          id: 'imported-1', bankName: 'Saved Bank',
+          account: const VietQrAccount(
+            bankBin: '970407', accountNumber: '123456',
+            accountName: 'RECIPIENT')),
+      ],
+      defaultId: 'imported-1',
+    );
+    final original = const BankBook();
+    final after = BankBook(
+      accounts: archived.accounts, defaultId: 'imported-1',
+      centerLogoPath: '/new/center.png',
+      footerLogoPath: '/new/footer.png',
+    );
+    final originalSettings = preferences({
+      'ttx_vietqr_bank_book_v1': original.encode(),
+    });
+    final incomingSettings = preferences({
+      'ttx_vietqr_bank_book_v1': archived.encode(),
+    });
+    final updated = preferences({
+      'ttx_vietqr_bank_book_v1': after.encode(),
+    });
+    final report = BackupImportPostflight.verify(
+      before: receipts({}), archive: receipts({}), after: receipts({}),
+      beforeSettings: originalSettings,
+      archiveSettings: incomingSettings,
+      afterSettings: updated,
+      archivedLogos: [
+        BackupLogoAsset(
+          slot: 'center', extension: 'png',
+          bytes: Uint8List.fromList(
+            const [137, 80, 78, 71, 13, 10, 26, 10])),
+        BackupLogoAsset(
+          slot: 'footer', extension: 'png',
+          bytes: Uint8List.fromList(
+            const [137, 80, 78, 71, 13, 10, 26, 10])),
+      ],
+    );
+    expect(report.verifiedVietQrAccounts, 1);
+    expect(report.verifiedVietQrLogos, 2);
+    expect(report.preservedExistingSettings, 1);
+  });
+
+  test('postflight rejects replacing an existing VietQR account', () {
+    final old = BankBook(
+      accounts: [
+        SavedBankAccount(
+          id: 'existing', bankName: 'My Bank',
+          account: const VietQrAccount(
+            bankBin: '970407', accountNumber: '100',
+            accountName: 'ORIGINAL')),
+      ],
+      defaultId: 'existing',
+    );
+    final tampered = BankBook(
+      accounts: [
+        SavedBankAccount(
+          id: 'existing', bankName: 'My Bank',
+          account: const VietQrAccount(
+            bankBin: '970407', accountNumber: '100',
+            accountName: 'CHANGED')),
+      ],
+      defaultId: 'existing',
+    );
+    expect(() => BackupImportPostflight.verify(
+      before: receipts({}), archive: receipts({}), after: receipts({}),
+      beforeSettings: preferences({
+        'ttx_vietqr_bank_book_v1': old.encode(),
+      }),
+      archiveSettings: preferences({
+        'ttx_vietqr_bank_book_v1': old.encode(),
+      }),
+      afterSettings: preferences({
+        'ttx_vietqr_bank_book_v1': tampered.encode(),
+      }),
+    ), throwsFormatException);
   });
 }
