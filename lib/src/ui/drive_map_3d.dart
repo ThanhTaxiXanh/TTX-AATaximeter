@@ -367,7 +367,6 @@ class DriveMap3DState extends State<DriveMap3D> {
     _visualCamera.reset();
     if (!widget.flat2D) {
       await _alignStreetLabels(controller);
-    }
       // Both OpenFreeMap Liberty and Dark use the OpenMapTiles "building"
       // vector source layer. Where OSM has no height, a modest 9m extrusion
       // is an illustration, not a measured real-world building height.
