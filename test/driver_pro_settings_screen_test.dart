@@ -30,7 +30,12 @@ void main() {
       onAction: (_) {},
       onPreferencesChanged: (value) => updated = value,
     )));
-    await tester.ensureVisible(find.text('Hiển thị tên đường đang đi'));
+    await tester.enterText(find.byType(TextField), 'Bản đồ');
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Hiển thị tên đường đang đi'), 180,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.pumpAndSettle();
     final tile = find.ancestor(
       of: find.text('Hiển thị tên đường đang đi'),
