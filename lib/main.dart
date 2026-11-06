@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
@@ -7,6 +8,8 @@ import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geolocator_android/geolocator_android.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'src/core/taximeter_engine.dart';
 import 'src/core/location_tracking_policy.dart';
@@ -113,6 +116,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   // sequence. Never advance it before the atomic transaction succeeds.
   int _persistedRouteCount = 0;
   bool _storageReady = false;
+  bool _exportingBackup = false;
   bool _savingNewTrip = false;
   DateTime _lastCheckpoint = DateTime.fromMillisecondsSinceEpoch(0);
   Future<void> _writeQueue = Future<void>.value();
@@ -1646,6 +1650,80 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     await _persistDashboardSettings(chosen);
   }
 
+  /// User-initiated, export-only protection for completed trip history.
+  /// Preferences (tariffs, bank accounts, branding) are stored elsewhere and
+  /// are intentionally NOT claimed to be part of this SQLite-only snapshot.
+  Future<void> _backupHistory() async {
+    if (_exportingBackup) return;
+    if (!_storageReady || _savingNewTrip || _pendingUnsaved != null ||
+        meter.status == MeterStatus.running ||
+        meter.status == MeterStatus.paused) {
+      _notify('Chỉ sao lưu sau khi chuyến đã kết thúc và lưu thành công.');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Sao lưu lịch sử chuyến đi'),
+        content: const Text('Tạo một bản sao SQLite gồm lịch sử, hóa đơn và '
+          'dữ liệu chuyến đã lưu. Bản sao không bao gồm tài khoản VietQR, '
+          'cài đặt xe hoặc bảng giá trong bộ nhớ tùy chọn. '
+          'Tệp có thể chứa thông tin chuyến đi nhạy cảm: chỉ lưu ở nơi '
+          'bạn tin cậy. Chức năng khôi phục chưa được triển khai.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Hủy')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Chọn nơi lưu')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _exportingBackup = true);
+    File? temporary;
+    try {
+      // Flush queued checkpoints before a consistent SQLite snapshot.
+      await _writeQueue;
+      if (meter.status == MeterStatus.running ||
+          meter.status == MeterStatus.paused ||
+          _pendingUnsaved != null) {
+        throw StateError('Chuyến đang hoạt động hoặc chưa lưu xong');
+      }
+      temporary = await repository.createVerifiedBackup(
+        destinationDirectory: await getTemporaryDirectory());
+      // FilePicker.saveFile currently accepts bytes, so bound peak RAM
+      // instead of risking process termination on an enormous history DB.
+      const maxInMemoryBackupBytes = 64 * 1024 * 1024;
+      if (await temporary.length() > maxInMemoryBackupBytes) {
+        throw StateError('Bản sao lớn hơn 64 MB; chưa thể xuất an toàn '
+            'bằng bộ chọn tệp hiện tại.');
+      }
+      final date = DateTime.now();
+      String two(int v) => v.toString().padLeft(2, '0');
+      final fileName = 'TTX_DriverPro_SQLite_'
+          '${date.year}${two(date.month)}${two(date.day)}_'
+          '${two(date.hour)}${two(date.minute)}${two(date.second)}.db';
+      final destination = await FilePicker.saveFile(
+        dialogTitle: 'Lưu bản sao SQLite TTX Driver Pro',
+        fileName: fileName,
+        bytes: await temporary.readAsBytes(),
+      );
+      if (!mounted) return;
+      _notify(destination == null
+        ? 'Đã hủy lưu bản sao; lịch sử trên máy không đổi.'
+        : 'Đã xuất bản sao lịch sử. Hãy giữ tệp ở nơi an toàn.');
+    } catch (error) {
+      if (mounted) _notify('Không tạo được bản sao: ${error.toString()}');
+    } finally {
+      if (temporary != null && await temporary.exists()) {
+        await temporary.delete();
+      }
+      if (mounted) setState(() => _exportingBackup = false);
+    }
+  }
+
   Future<void> _settingsMenu() async {
     final item = await showModalBottomSheet<String>(
       context: context, showDragHandle: true,
@@ -1659,6 +1737,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         ListTile(leading: const Icon(Icons.directions_car_outlined),
           title: const Text('Hãng xe và biển số'),
           onTap: () => Navigator.pop(context, 'vehicle')),
+        ListTile(leading: const Icon(Icons.backup_outlined),
+          title: const Text('Sao lưu lịch sử chuyến (SQLite)'),
+          subtitle: const Text('Xuất bản sao an toàn, không ghi đè dữ liệu'),
+          onTap: () => Navigator.pop(context, 'backup')),
       ])),
     );
     if (!mounted) return;
@@ -1669,6 +1751,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         await _editDashboardPreferences();
       case 'vehicle':
         await _configureVehicle();
+      case 'backup':
+        await _backupHistory();
     }
   }
 
@@ -1679,6 +1763,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         return;
       case 'bank':
         _configureBank();
+        return;
+      case 'backup':
+        _backupHistory();
         return;
       case 'quote':
         _flatFareDialog();
@@ -1739,6 +1826,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                 child: Text('Cài đặt xe và biển số')),
               PopupMenuItem(value: 'bank',
                 child: Text('Tài khoản ngân hàng VietQR')),
+              PopupMenuItem(value: 'backup',
+                child: Text('Sao lưu lịch sử (SQLite)')),
               PopupMenuItem(value: 'quote',
                 child: Text('Báo giá chuyến đi')),
               PopupMenuItem(value: 'qr',
