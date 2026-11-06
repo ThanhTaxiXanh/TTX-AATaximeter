@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:path/path.dart' as path;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
@@ -320,6 +321,50 @@ class TripRepository {
   Future<void> clearAll() async {
     final db = await _db;
     await db.delete('trips');
+  }
+
+  /// Create a consistent, single-file SQLite snapshot without touching the
+  /// live database or its WAL. Never copy the live .db file while it is open:
+  /// pending WAL frames could be missing from such a copy.
+  ///
+  /// The caller owns the returned temporary file and MUST remove it after
+  /// exporting/cancelling. No import or overwrite operation is performed.
+  Future<File> createVerifiedBackup({
+    required Directory destinationDirectory,
+  }) async {
+    final db = await _db;
+    await destinationDirectory.create(recursive: true);
+    final filename = 'ttx-sqlite-backup-'
+        '${DateTime.now().toUtc().microsecondsSinceEpoch}.db';
+    final file = File(path.join(destinationDirectory.path, filename));
+    if (await file.exists()) {
+      throw StateError('Backup target already exists');
+    }
+    try {
+      // SQLite VACUUM INTO takes a transactionally consistent snapshot,
+      // including data committed in the write-ahead log.
+      await db.execute('VACUUM INTO ?', [file.path]);
+      final backup = await openDatabase(
+        file.path, readOnly: true, singleInstance: false);
+      try {
+        final check = await backup.rawQuery('PRAGMA integrity_check');
+        if (check.length != 1 || check.single['integrity_check'] != 'ok') {
+          throw const FormatException('SQLite backup integrity check failed');
+        }
+        final tables = await backup.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type = 'table' "
+          "AND name IN ('trips', 'active_trip', 'active_trip_route')");
+        if (tables.length != 3) {
+          throw const FormatException('SQLite backup schema is incomplete');
+        }
+      } finally {
+        await backup.close();
+      }
+      return file;
+    } catch (_) {
+      if (await file.exists()) await file.delete();
+      rethrow; // No unsafe raw-file-copy fallback if VACUUM INTO fails.
+    }
   }
 
   Future<void> dispose() async {
