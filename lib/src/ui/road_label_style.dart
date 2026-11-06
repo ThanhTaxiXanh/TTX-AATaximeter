@@ -39,19 +39,48 @@ Map<String, String> darkRoadLayerColors(String styleJson) {
     throw const FormatException('Invalid MapLibre style layers');
   }
   const palette = <String, String>{
-    'highway_path': '#344A5C',
-    'highway_minor': '#536E82',
-    'highway_major_casing': '#2F4358',
-    'highway_major_inner': '#819DB4',
-    'highway_major_subtle': '#52758E',
-    'highway_motorway_casing': '#47627B',
-    'highway_motorway_inner': '#9EC8E8',
-    'highway_motorway_subtle': '#6B8DA7',
+    'highway_path': '#647D9D',
+    'highway_minor': '#7E99B9',
+    'highway_major_casing': '#324666',
+    'highway_major_inner': '#91A9C9',
+    'highway_major_subtle': '#667E9F',
+    'highway_motorway_casing': '#354F71',
+    'highway_motorway_inner': '#B1C6DE',
+    'highway_motorway_subtle': '#8AA6C7',
   };
   final found = <String, String>{};
   for (final item in root['layers'] as List) {
     if (item is! Map || item['type'] != 'line' ||
         item['source-layer'] != 'transportation') continue;
+    final id = item['id'];
+    if (id is String && palette.containsKey(id)) {
+      found[id] = palette[id]!;
+    }
+  }
+  return found;
+}
+
+ /// Road fills and landscape colors tuned to the user's deep-navy
+ /// reference screenshot. Only exact native Dark layer IDs are touched.
+Map<String, String> darkSurfaceLayerColors(String styleJson) {
+  final root = jsonDecode(styleJson);
+  if (root is! Map || root['layers'] is! List) {
+    throw const FormatException('Invalid MapLibre style layers');
+  }
+  const palette = <String, String>{
+    'water': '#122A4B',
+    'landcover_ice_shelf': '#1C2C4A',
+    'landcover_glacier': '#202E4A',
+    'landuse_residential': '#1B2B49',
+    'landcover_wood': '#223956',
+    'landuse_park': '#263A55',
+    'building': '#344461',
+    'road_area_pier': '#263958',
+    'aeroway-area': '#22324F',
+  };
+  final found = <String, String>{};
+  for (final item in root['layers'] as List) {
+    if (item is! Map || item['type'] != 'fill') continue;
     final id = item['id'];
     if (id is String && palette.containsKey(id)) {
       found[id] = palette[id]!;
