@@ -1,10 +1,12 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ttx_aataximeter/src/core/taximeter_engine.dart';
 import 'package:ttx_aataximeter/src/data/settings_backup_bundle.dart';
 import 'package:ttx_aataximeter/src/data/tariff_codec.dart';
 import 'package:ttx_aataximeter/src/domain/dashboard_preferences.dart';
+import 'package:ttx_aataximeter/src/domain/tariff_catalog.dart';
 import 'package:ttx_aataximeter/src/domain/vehicle_registration.dart';
 import 'package:ttx_aataximeter/src/payment/bank_book.dart';
 import 'package:ttx_aataximeter/src/payment/vietqr.dart';
@@ -100,5 +102,62 @@ void main() {
       () => SettingsBackupBundle.decode(huge),
       throwsFormatException,
     );
+  });
+
+  test('all registered user configuration categories are included in a '
+      'complete portable snapshot, excluding Android permission flags',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = SharedPreferencesAsync();
+    final account = const VietQrAccount(
+      bankBin: '970407', accountNumber: '123456789',
+      accountName: 'DRIVER TEST');
+    final settings = <String, String>{
+      DashboardPreferences.storageKey:
+          const DashboardPreferences(default3D: true, darkMap: true,
+            showCurrentRoadName: false).encode(),
+      'ttx_tariff_v1': TariffCodec.encode(TariffConfig.demo()),
+      'ttx_tariff_catalog_v1': TariffCatalog.initial().encode(),
+      'ttx_vehicle_v1': VehicleRegistration(
+          category: VehicleCategory.fiveSeats, brand: 'VinFast',
+          plate: '98G-001.07').encode(),
+      'ttx_vietqr_bank_book_v1': BankBook(accounts: [
+        SavedBankAccount(id: 'one', bankName: 'Test Bank',
+          account: account),
+      ], defaultId: 'one').encode(),
+      'ttx_vietqr_account_v1': jsonEncode(account.toJson()),
+    };
+    for (final entry in settings.entries) {
+      await prefs.setString(entry.key, entry.value);
+    }
+    await prefs.setBool('ttx_location_onboarded_v1', true);
+    await prefs.setBool('ttx_background_explained_v1', true);
+    expect(
+      SettingsBackupBundle.configurationGroups.values
+        .expand((list) => list).toSet(),
+      SettingsBackupBundle.supportedKeys.toSet(),
+    );
+    final backup = await SettingsBackupBundle.capture(prefs);
+    final restored = SettingsBackupBundle.decode(backup.encode());
+    expect(restored.settings, settings);
+    expect(restored.capturedGroups, {
+      'Xe & hồ sơ': 1,
+      'Cước phí & chuyến đi': 2,
+      'Bản đồ, lời chào & HUD': 1,
+      'Thanh toán VietQR': 2,
+    });
+    expect(restored.settings.containsKey('ttx_location_onboarded_v1'),
+      isFalse);
+    expect(restored.settings.containsKey('ttx_background_explained_v1'),
+      isFalse);
+  });
+
+  test('new unknown TTX preference cannot be silently left out of backups',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = SharedPreferencesAsync();
+    await prefs.setString('ttx_future_user_option', 'value');
+    await expectLater(SettingsBackupBundle.capture(prefs),
+      throwsFormatException);
   });
 }
