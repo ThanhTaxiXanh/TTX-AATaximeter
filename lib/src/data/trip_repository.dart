@@ -367,9 +367,110 @@ class TripRepository {
     }
   }
 
+  /// Preflight of an *external* backup. Opens SQLite read-only, verifies
+  /// schema/receipt payloads/active journal, then closes it. Never imports
+  /// or replaces the running app's database.
+  static Future<TripBackupInspection> inspectBackupFile(File file) async {
+    if (!await file.exists() || await file.length() == 0) {
+      throw const FormatException('Tệp SQLite sao lưu trống hoặc không tồn tại');
+    }
+    final backup = await openDatabase(
+      file.path, readOnly: true, singleInstance: false);
+    try {
+      final integrity = await backup.rawQuery('PRAGMA integrity_check');
+      if (integrity.length != 1 ||
+          integrity.single['integrity_check'] != 'ok') {
+        throw const FormatException('SQLite integrity_check không đạt');
+      }
+      final version = await backup.rawQuery('PRAGMA user_version');
+      if (version.isEmpty || version.first['user_version'] != 3) {
+        throw const FormatException('Chỉ hỗ trợ kiểm tra SQLite schema v3');
+      }
+      final tables = await backup.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type = 'table' "
+        "AND name IN ('trips','active_trip','active_trip_route')");
+      if (tables.length != 3) {
+        throw const FormatException('Thiếu bảng dữ liệu TTX');
+      }
+      final completed = await backup.query('trips', columns: ['payload']);
+      for (final row in completed) {
+        final payload = row['payload'];
+        if (payload is! String) {
+          throw const FormatException('Hóa đơn SQLite thiếu nội dung');
+        }
+        TripRecord.decode(payload); // Validate all receipts, not only count.
+      }
+      final activeRows = await backup.query('active_trip',
+        columns: ['payload']);
+      if (activeRows.length > 1) {
+        throw const FormatException('Có nhiều checkpoint đang hoạt động');
+      }
+      final routeRows = await backup.rawQuery(
+        'SELECT COUNT(*) AS count, MIN(sequence) AS first, '
+        'MAX(sequence) AS last FROM active_trip_route');
+      final routeInfo = routeRows.single;
+      final routeCount = routeInfo['count'] as int;
+      if (activeRows.isEmpty) {
+        if (routeCount != 0) {
+          throw const FormatException('GPS không có chuyến đang hoạt động');
+        }
+        return TripBackupInspection(
+          completedTripCount: completed.length,
+          hasActiveTrip: false, activeRouteCount: 0);
+      }
+      final payload = activeRows.single['payload'];
+      if (payload is! String) {
+        throw const FormatException('Checkpoint thiếu dữ liệu');
+      }
+      final snapshot = TripSessionSnapshot.decode(payload);
+      final header = jsonDecode(payload);
+      if (header is! Map) {
+        throw const FormatException('Checkpoint không hợp lệ');
+      }
+      if (header['routeStorage'] == 'sqlite-v3') {
+        final expected = header['routeCount'];
+        if (expected is! int || expected < 0 ||
+            expected != routeCount ||
+            (routeCount > 0 &&
+              (routeInfo['first'] != 0 || routeInfo['last'] != routeCount - 1))) {
+          throw const FormatException('Số điểm GPS checkpoint không khớp');
+        }
+      } else if (header['routeStorage'] == null) {
+        if (routeCount != 0) {
+          throw const FormatException('Checkpoint cũ có GPS journal bất thường');
+        }
+        // Legacy payload keeps the route inside JSON.
+        return TripBackupInspection(
+          completedTripCount: completed.length,
+          hasActiveTrip: true,
+          activeRouteCount: snapshot.routePoints.length);
+      } else {
+        throw const FormatException('Kiểu lưu GPS không được hỗ trợ');
+      }
+      return TripBackupInspection(
+        completedTripCount: completed.length,
+        hasActiveTrip: true, activeRouteCount: routeCount);
+    } finally {
+      await backup.close();
+    }
+  }
+
   Future<void> dispose() async {
     final db = _database;
     _database = null;
     if (db != null) await db.close();
   }
+}
+
+/// Verified read-only metadata. No restored data is applied to the app.
+class TripBackupInspection {
+  const TripBackupInspection({
+    required this.completedTripCount,
+    required this.hasActiveTrip,
+    required this.activeRouteCount,
+  });
+
+  final int completedTripCount;
+  final bool hasActiveTrip;
+  final int activeRouteCount;
 }
