@@ -2112,7 +2112,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         device: live,
         archiveSettings: archive.settings,
         deviceSettings: liveSettings);
-      final incomingBookRaw = archive.settings['ttx_vietqr_bank_book_v1'];
+      final incomingBookRaw = archive.settings.settings['ttx_vietqr_bank_book_v1'];
       final deviceBookRaw = liveSettings.settings['ttx_vietqr_bank_book_v1'];
       final vietQrPlan = incomingBookRaw == null
           ? VietQrMergePlan.compare(
