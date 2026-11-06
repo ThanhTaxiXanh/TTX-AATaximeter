@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../payment/bank_book.dart';
 import 'backup_logo_asset.dart';
 import 'settings_backup_bundle.dart';
+import 'vietqr_merge_plan.dart';
 
 /// Idempotent, additive settings import: an existing preference is NEVER
 /// removed or updated. It cannot replace a bank account or fare preset.
@@ -39,8 +40,12 @@ class SettingsImportResult {
     required this.addedKeys,
     required this.skippedExistingKeys,
     required this.restoredLogos,
+    required this.addedBankAccounts,
+    required this.updatedBankBook,
   });
   final int addedKeys, skippedExistingKeys, restoredLogos;
+  final int addedBankAccounts;
+  final bool updatedBankBook;
 }
 
 class BackupSettingsImporter {
@@ -57,28 +62,12 @@ class BackupSettingsImporter {
     final local = await SettingsBackupBundle.capture(preferences);
     final plan = SettingsImportPlan.compare(
       archive: archive, device: local);
-    final missing = Map<String, String>.from(plan.missing);
-    var logoCount = 0;
+    final missing = Map<String, String>.from(plan.missing)
+      ..remove(_bankKey);
 
-    // Portable bytes are only used if the entire bank book is absent.
-    // Old absolute paths in v1 archives are discarded, not trusted.
-    if (missing.containsKey(_bankKey)) {
-      var book = BankBook.decode(missing[_bankKey]!);
-      final stored = <String, String>{};
-      for (final logo in logos) {
-        stored[logo.slot] = await _storePortableLogo(
-          logo, supportDirectory);
-        logoCount++;
-      }
-      book = book.copyWith(
-        removeCenterLogo: true, removeFooterLogo: true);
-      book = book.copyWith(
-        centerLogoPath: stored['center'],
-        footerLogoPath: stored['footer']);
-      missing[_bankKey] = book.encode();
-    }
-
-    var added = 0, skipped = plan.skippedExisting;
+    // Preserve every pre-existing non-VietQR setting byte-for-byte.
+    var added = 0;
+    var skipped = plan.skippedExisting;
     for (final entry in missing.entries) {
       if (await preferences.getString(entry.key) != null) {
         skipped++;
@@ -87,9 +76,54 @@ class BackupSettingsImporter {
       await preferences.setString(entry.key, entry.value);
       added++;
     }
+
+    final rawBank = archive.settings[_bankKey];
+    if (rawBank == null) {
+      return SettingsImportResult(
+        addedKeys: added, skippedExistingKeys: skipped,
+        restoredLogos: 0, addedBankAccounts: 0,
+        updatedBankBook: false);
+    }
+
+    final archivedBook = BankBook.decode(rawBank);
+    // Always read the live book again immediately before the bank write.
+    // The old importer incorrectly treated an existing EMPTY book as full.
+    final localBank = await preferences.getString(_bankKey);
+    final deviceBook =
+        localBank == null ? const BankBook() : BankBook.decode(localBank);
+    final recovery = VietQrMergePlan.compare(
+      device: deviceBook, archive: archivedBook, logos: logos);
+    final needsCreate = localBank == null;
+    if (!needsCreate && !recovery.hasChanges) {
+      return SettingsImportResult(
+        addedKeys: added, skippedExistingKeys: skipped,
+        restoredLogos: 0, addedBankAccounts: 0,
+        updatedBankBook: false);
+    }
+
+    final restoredPaths = <String, String>{};
+    for (final logo in logos) {
+      if (!recovery.logoSlotsToAdd.contains(logo.slot)) continue;
+      restoredPaths[logo.slot] = await _storePortableLogo(
+        logo, supportDirectory);
+    }
+    final finalBook = BankBook(
+      accounts: recovery.book.accounts,
+      defaultId: recovery.book.defaultId,
+      centerLogoPath: deviceBook.centerLogoPath ?? restoredPaths['center'],
+      footerLogoPath: deviceBook.footerLogoPath ?? restoredPaths['footer'],
+    );
+    // Validate before committing one atomic SharedPreferences value.
+    final encoded = finalBook.encode();
+    await preferences.setString(_bankKey, encoded);
+    if (needsCreate) added++;
     return SettingsImportResult(
-      addedKeys: added, skippedExistingKeys: skipped,
-      restoredLogos: missing.containsKey(_bankKey) ? logoCount : 0);
+      addedKeys: added,
+      skippedExistingKeys: skipped,
+      restoredLogos: restoredPaths.length,
+      addedBankAccounts: recovery.accountsToAdd,
+      updatedBankBook: !needsCreate,
+    );
   }
 
   static Future<String> _storePortableLogo(
