@@ -22,6 +22,7 @@ dependencies:
   emv_qr_builder: ^1.0.2
   flutter_svg: ^2.3.2
   file_picker: ^13.3.2
+  crypto: ^3.0.8
 
 dev_dependencies:
   flutter_test:
