@@ -119,6 +119,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   double? _mapLon;
   double _headingDegrees = 0;
   DashboardPreferences _dashboardPrefs = const DashboardPreferences();
+  Future<void> _dashboardSettingsWrites = Future<void>.value();
   bool _is3D = false;
   bool _enableSaved3DAfterFirstMapFrame = false;
   String? _startupError;
@@ -1667,12 +1668,17 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   }
 
   Future<void> _persistDashboardSettings(
-      DashboardPreferences next) async {
-    try {
-      await store.setString(DashboardPreferences.storageKey, next.encode());
-    } catch (error) {
-      if (mounted) _notify('Không lưu được cài đặt giao diện: ' + error.toString());
-    }
+      DashboardPreferences next) {
+    // Serialize rapid slider/toggle updates so a slow earlier write cannot
+    // overwrite the latest choice. The backup path awaits this queue.
+    final latest = _dashboardSettingsWrites.then((_) =>
+        store.setString(DashboardPreferences.storageKey, next.encode()));
+    _dashboardSettingsWrites = latest.catchError((Object error) {
+      if (mounted) {
+        _notify('Không lưu được cài đặt giao diện: $error');
+      }
+    });
+    return _dashboardSettingsWrites;
   }
 
   void _toggleMap3D() {
@@ -1819,6 +1825,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     if (confirmed != true || !mounted) return;
     setState(() => _settingsBackupBusy = true);
     try {
+      await _dashboardSettingsWrites;
       final backup = await SettingsBackupBundle.capture(store);
       final encoded = Uint8List.fromList(utf8.encode(backup.encode()));
       final date = DateTime.now();
@@ -1908,7 +1915,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         title: const Text('Sao lưu gộp dữ liệu TTX'),
         content: const Text(
           'Xuất một tệp .ttxbackup gồm SQLite (hóa đơn, lịch sử, GPS) '
-          'và cấu hình JSON (bảng giá, thông tin xe, VietQR, bản đồ). '
+          'và TOÀN BỘ cấu hình người dùng đã lưu: Xe & hồ sơ '
+          '(hãng xe, biển số, loại xe), Cước phí & chuyến đi '
+          '(bảng giá, biểu giá đang chọn), bản đồ 2D/3D, sáng/tối, '
+          'góc nghiêng, tên đường, lời chào và thanh toán VietQR. '
           'Gói có SHA-256 phát hiện lỗi dữ liệu nhưng KHÔNG mã hóa. '
           'Tài khoản ngân hàng và lịch sử vị trí có thể đọc được, '
           'nên chỉ lưu ở nơi riêng tư đáng tin cậy. '
@@ -1935,6 +1945,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           meter.status == MeterStatus.paused) {
         throw StateError('Chuyến chưa hoàn tất hoặc chưa lưu xong');
       }
+      await _dashboardSettingsWrites;
       final preferences = await SettingsBackupBundle.capture(store);
       final rawBankBook = preferences.settings['ttx_vietqr_bank_book_v1'];
       final logos = await BackupLogoCapture.fromBankBook(
@@ -1964,7 +1975,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       if (!mounted) return;
       _notify(selected == null
         ? 'Đã hủy xuất tệp, dữ liệu trên điện thoại giữ nguyên.'
-        : 'Đã xuất gói dữ liệu kèm ${logos.length} logo VietQR. '
+        : 'Đã xuất ${preferences.settings.length} mục cấu hình, '
+          'SQLite và ${logos.length} logo VietQR. '
           'Hãy cất giữ riêng tư và kiểm tra lại tệp.');
     } catch (error) {
       if (mounted) _notify('Sao lưu gộp không thành công: $error');
@@ -2028,6 +2040,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             'Chuyến đang lưu dở: ${verification.hasActiveTrip ? "Có" : "Không"}\n'
             'Điểm GPS đang lưu: ${verification.activeRouteCount}\n'
             'Nhóm cấu hình: ${bundle.settings.settings.length}\n'
+            '${bundle.settings.coverageSummary}\n'
             'Có dữ liệu VietQR: ${bundle.settings.includesVietQr ? "Có" : "Không"}\n'
             'Logo VietQR đi kèm: ${bundle.logos.length}\n\n'
             'Đã kiểm tra SHA-256 và cấu trúc SQLite. Đây KHÔNG phải '
