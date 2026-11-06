@@ -69,9 +69,9 @@ class BackupLogoAsset {
         } on FormatException {
           throw const FormatException('Logo SVG không phải UTF-8');
         }
-        if (!RegExp(r'<svg\\b', caseSensitive: false).hasMatch(xml) ||
-            RegExp(r'<\\s*script\\b|<!DOCTYPE|<!ENTITY|<\\s*foreignObject\\b|'
-              r'(?:xlink:)?href\\s*=\\s*["\\\']\\s*(?:https?:|file:|data:)',
+        if (!RegExp(r'<svg\b', caseSensitive: false).hasMatch(xml) ||
+            RegExp(r'<\s*script\b|<!DOCTYPE|<!ENTITY|<\s*foreignObject\b|'
+              r'(?:xlink:)?href\s*=',
               caseSensitive: false).hasMatch(xml)) {
           throw const FormatException('Logo SVG không được hỗ trợ an toàn');
         }
