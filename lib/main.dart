@@ -19,6 +19,7 @@ import 'src/ui/quote_dialog.dart';
 import 'src/data/trip_repository.dart';
 import 'src/data/settings_backup_bundle.dart';
 import 'src/data/unified_backup_bundle.dart';
+import 'src/data/backup_logo_asset.dart';
 import 'src/domain/trip_record.dart';
 import 'src/domain/trip_route_point.dart';
 import 'src/payment/vietqr.dart';
@@ -1838,8 +1839,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     }
   }
 
-  /// A single export-only archive with a SQLite snapshot and preferences.
-  /// Image/logo files and Android permissions are not part of this format.
+  /// An export-only archive containing SQLite, preferences and app-owned logos.
+  /// Android permissions and non-app files remain outside this format.
   Future<void> _backupCombined() async {
     if (_unifiedBackupBusy || _exportingBackup || _settingsBackupBusy) return;
     if (!_storageReady || _savingNewTrip || _pendingUnsaved != null ||
@@ -1858,7 +1859,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           'Gói có SHA-256 phát hiện lỗi dữ liệu nhưng KHÔNG mã hóa. '
           'Tài khoản ngân hàng và lịch sử vị trí có thể đọc được, '
           'nên chỉ lưu ở nơi riêng tư đáng tin cậy. '
-          'Ảnh logo và quyền Android không được đóng gói. '
+          'Ảnh logo VietQR đã lưu trong ứng dụng sẽ được đóng gói, '
+          'nhưng quyền Android và dữ liệu khác ngoài ứng dụng thì không. '
           'Chưa có chức năng khôi phục hoặc chuyển chữ ký APK an toàn.'),
         actions: [
           TextButton(
@@ -1881,6 +1883,12 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         throw StateError('Chuyến chưa hoàn tất hoặc chưa lưu xong');
       }
       final preferences = await SettingsBackupBundle.capture(store);
+      final rawBankBook = preferences.settings['ttx_vietqr_bank_book_v1'];
+      final logos = await BackupLogoCapture.fromBankBook(
+        bankBook: rawBankBook == null
+            ? const BankBook() : BankBook.decode(rawBankBook),
+        appSupportDirectory: await getApplicationSupportDirectory(),
+      );
       sqliteCopy = await repository.createVerifiedBackup(
         destinationDirectory: await getTemporaryDirectory());
       if (await sqliteCopy.length() > UnifiedBackupBundle.maxSqliteBytes) {
@@ -1888,7 +1896,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       }
       final bundle = UnifiedBackupBundle.fromParts(
         settings: preferences,
-        sqliteBytes: await sqliteCopy.readAsBytes());
+        sqliteBytes: await sqliteCopy.readAsBytes(),
+        logos: logos);
       final date = DateTime.now();
       String two(int n) => n.toString().padLeft(2, '0');
       final filename = 'TTX_DriverPro_DuLieu_'
@@ -1902,7 +1911,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       if (!mounted) return;
       _notify(selected == null
         ? 'Đã hủy xuất tệp, dữ liệu trên điện thoại giữ nguyên.'
-        : 'Đã xuất gói dữ liệu. Cất giữ riêng tư và kiểm tra lại tệp.');
+        : 'Đã xuất gói dữ liệu kèm ${logos.length} logo VietQR. '
+          'Hãy cất giữ riêng tư và kiểm tra lại tệp.');
     } catch (error) {
       if (mounted) _notify('Sao lưu gộp không thành công: $error');
     } finally {
@@ -1932,7 +1942,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       final length = selected.lengthSync() ?? await selected.length();
       if (length == null || length <= 0 ||
           length > UnifiedBackupBundle.maxBundleBytes) {
-        throw const FormatException('Gói sao lưu trống hoặc quá 64 MiB');
+        throw const FormatException('Gói sao lưu trống hoặc quá dung lượng cho phép');
       }
       final bytes = await selected.readAsBytes();
       if (bytes.length > UnifiedBackupBundle.maxBundleBytes) {
@@ -1955,7 +1965,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             'Chuyến đang lưu dở: ${verification.hasActiveTrip ? "Có" : "Không"}\n'
             'Điểm GPS đang lưu: ${verification.activeRouteCount}\n'
             'Nhóm cấu hình: ${bundle.settings.settings.length}\n'
-            'Có dữ liệu VietQR: ${bundle.settings.includesVietQr ? "Có" : "Không"}\n\n'
+            'Có dữ liệu VietQR: ${bundle.settings.includesVietQr ? "Có" : "Không"}\n'
+            'Logo VietQR đi kèm: ${bundle.logos.length}\n\n'
             'Đã kiểm tra SHA-256 và cấu trúc SQLite. Đây KHÔNG phải '
             'xác minh tác giả, mã hóa hay thử nghiệm khôi phục. '
             'Không có dữ liệu nào được nhập vào ứng dụng.'),
