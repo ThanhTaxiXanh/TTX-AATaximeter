@@ -491,13 +491,13 @@ class TripRepository {
   Future<CompletedTripImportResult> importMissingCompletedTrips(
       File externalBackup) async {
     // Full read-only preflight precedes any write to the live database.
-    await inspectBackupFile(externalBackup);
+    final inspected = await inspectBackupFile(externalBackup);
     final external = await openDatabase(
       externalBackup.path, readOnly: true, singleInstance: false);
     try {
       final rows = await external.query('trips',
         columns: ['id', 'payload']);
-      final candidates = <TripRecord>[];
+      final candidates = <({TripRecord record, String payload})>[];
       for (final row in rows) {
         final id = row['id'];
         final payload = row['payload'];
@@ -508,7 +508,7 @@ class TripRepository {
         if (decoded.id != id) {
           throw const FormatException('Mã hóa đơn sao lưu không khớp');
         }
-        candidates.add(decoded);
+        candidates.add((record: decoded, payload: payload));
       }
       final live = await _db;
       return await live.transaction((txn) async {
@@ -520,28 +520,33 @@ class TripRepository {
         var imported = 0;
         var identical = 0;
         var conflicts = 0;
-        for (final trip in candidates) {
+        for (final candidate in candidates) {
+          final trip = candidate.record;
           final existing = await txn.query('trips',
             columns: ['payload'],
             where: 'id = ?', whereArgs: [trip.id], limit: 1);
           if (existing.isNotEmpty) {
             final current = existing.single['payload'];
-            if (current == trip.encode()) {
+            if (current == candidate.payload) {
               identical++;
             } else {
               conflicts++;
             }
             continue;
           }
-          await txn.insert('trips', _row(trip),
-            conflictAlgorithm: ConflictAlgorithm.abort);
+          // Preserve the verified original JSON exactly, including field
+          // ordering and unknown legacy fields. Re-encoding a TripRecord
+          // could change its SHA-256 even when the fare remains identical.
+          await txn.insert('trips', {
+            ..._row(trip),
+            'payload': candidate.payload,
+          }, conflictAlgorithm: ConflictAlgorithm.abort);
           imported++;
         }
         return CompletedTripImportResult(
           imported: imported, identical: identical,
           conflictsSkipped: conflicts,
-          unfinishedBackupSkipped: (await external.query(
-            'active_trip', columns: ['id'], limit: 1)).isNotEmpty);
+          unfinishedBackupSkipped: inspected.hasActiveTrip);
       });
     } finally {
       await external.close();
