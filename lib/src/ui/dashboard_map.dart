@@ -356,6 +356,7 @@ class _DashboardMapState extends State<DashboardMap> {
               latitude: widget.latitude,
               longitude: widget.longitude,
               headingDegrees: widget.headingDegrees,
+              speedKmh: widget.speedKmh,
               pitchDegrees: widget.pitchDegrees,
               dark: widget.dark,
               routePoints: widget.routePoints,
