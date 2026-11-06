@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
@@ -16,6 +17,7 @@ import 'src/core/location_tracking_policy.dart';
 import 'src/ui/fare_breakdown_section.dart';
 import 'src/ui/quote_dialog.dart';
 import 'src/data/trip_repository.dart';
+import 'src/data/settings_backup_bundle.dart';
 import 'src/domain/trip_record.dart';
 import 'src/domain/trip_route_point.dart';
 import 'src/payment/vietqr.dart';
@@ -117,6 +119,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   int _persistedRouteCount = 0;
   bool _storageReady = false;
   bool _exportingBackup = false;
+  bool _settingsBackupBusy = false;
   bool _savingNewTrip = false;
   DateTime _lastCheckpoint = DateTime.fromMillisecondsSinceEpoch(0);
   Future<void> _writeQueue = Future<void>.value();
@@ -1724,6 +1727,115 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     }
   }
 
+  /// Exports the exact app-managed JSON settings stored in preferences.
+  /// This intentionally excludes the local SQLite history, Android runtime
+  /// permissions and external logo files (the bank book stores logo paths).
+  Future<void> _backupSettings() async {
+    if (_settingsBackupBusy) return;
+    if (!_storageReady || _savingNewTrip ||
+        meter.status == MeterStatus.running ||
+        meter.status == MeterStatus.paused) {
+      _notify('Hãy hoàn tất chuyến trước khi sao lưu cấu hình.');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Sao lưu cấu hình ứng dụng'),
+        content: const Text(
+          'Xuất bảng giá, thông tin xe, thiết lập bản đồ và tài khoản VietQR '
+          'đã lưu thành tệp JSON riêng. '
+          'Tệp chứa thông tin tài khoản ngân hàng ở dạng văn bản, '
+          'không mã hóa: chỉ lưu ở vị trí riêng tư đáng tin cậy. '
+          'Tệp này không chứa lịch sử SQLite hoặc ảnh logo; '
+          'để lưu lịch sử, cần xuất thêm bản sao SQLite. '
+          'Chưa hỗ trợ nhập/khôi phục tự động.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Hủy')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Xuất cấu hình')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _settingsBackupBusy = true);
+    try {
+      final backup = await SettingsBackupBundle.capture(store);
+      final encoded = Uint8List.fromList(utf8.encode(backup.encode()));
+      final date = DateTime.now();
+      String two(int value) => value.toString().padLeft(2, '0');
+      final filename = 'TTX_DriverPro_CauHinh_'
+          '${date.year}${two(date.month)}${two(date.day)}_'
+          '${two(date.hour)}${two(date.minute)}${two(date.second)}.json';
+      final destination = await FilePicker.saveFile(
+        dialogTitle: 'Lưu bản sao cấu hình TTX Driver Pro',
+        fileName: filename,
+        bytes: encoded,
+      );
+      if (!mounted) return;
+      _notify(destination == null
+        ? 'Đã hủy sao lưu cấu hình; dữ liệu trên máy không thay đổi.'
+        : 'Đã xuất cấu hình (${backup.settings.length} nhóm). '
+          'Hãy cất giữ cùng bản sao SQLite, không chia sẻ công khai.');
+    } catch (error) {
+      if (mounted) _notify('Không xuất được cấu hình: $error');
+    } finally {
+      if (mounted) setState(() => _settingsBackupBusy = false);
+    }
+  }
+
+  /// Preflight only: parse and validate an exported settings file.
+  /// Never writes SharedPreferences or applies any imported setting.
+  Future<void> _inspectSettingsBackup() async {
+    if (_settingsBackupBusy) return;
+    setState(() => _settingsBackupBusy = true);
+    try {
+      final picked = await FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: const ['json'],
+      );
+      if (picked == null) return;
+      final length = picked.lengthSync() ?? await picked.length();
+      if (length == null ||
+          length <= 0 ||
+          length > SettingsBackupBundle.maxExportBytes) {
+        throw const FormatException('Tệp cấu hình trống hoặc vượt 256 KB');
+      }
+      final bytes = await picked.readAsBytes();
+      if (bytes.length > SettingsBackupBundle.maxExportBytes) {
+        throw const FormatException('Tệp cấu hình vượt 256 KB');
+      }
+      final preview = SettingsBackupBundle.decode(
+        utf8.decode(bytes, allowMalformed: false));
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Bản sao cấu hình hợp lệ'),
+          content: Text(
+            'Thời điểm tạo (UTC): ${preview.exportedAtUtc.toIso8601String()}\n'
+            'Số nhóm cấu hình: ${preview.settings.length}\n'
+            'Thông tin VietQR: ${preview.includesVietQr ? "Có" : "Không"}\n\n'
+            'Đây chỉ là kiểm tra cấu trúc tệp; chưa khôi phục dữ liệu. '
+            'Các đường dẫn logo (nếu có) không chứa ảnh logo gốc. '
+            'Không gỡ ứng dụng cho đến khi có công cụ khôi phục được thử nghiệm.'),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Đóng')),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) _notify('Tệp sao lưu cấu hình không hợp lệ: $error');
+    } finally {
+      if (mounted) setState(() => _settingsBackupBusy = false);
+    }
+  }
+
   Future<void> _settingsMenu() async {
     final item = await showModalBottomSheet<String>(
       context: context, showDragHandle: true,
@@ -1741,6 +1853,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           title: const Text('Sao lưu lịch sử chuyến (SQLite)'),
           subtitle: const Text('Xuất bản sao an toàn, không ghi đè dữ liệu'),
           onTap: () => Navigator.pop(context, 'backup')),
+        ListTile(leading: const Icon(Icons.settings_backup_restore_outlined),
+          title: const Text('Sao lưu cấu hình (JSON)'),
+          subtitle: const Text('Bảng giá, xe, VietQR và bản đồ'),
+          onTap: () => Navigator.pop(context, 'backupSettings')),
       ])),
     );
     if (!mounted) return;
@@ -1753,6 +1869,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         await _configureVehicle();
       case 'backup':
         await _backupHistory();
+      case 'backupSettings':
+        await _backupSettings();
     }
   }
 
@@ -1766,6 +1884,12 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         return;
       case 'backup':
         _backupHistory();
+        return;
+      case 'backupSettings':
+        _backupSettings();
+        return;
+      case 'inspectSettings':
+        _inspectSettingsBackup();
         return;
       case 'quote':
         _flatFareDialog();
@@ -1828,6 +1952,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                 child: Text('Tài khoản ngân hàng VietQR')),
               PopupMenuItem(value: 'backup',
                 child: Text('Sao lưu lịch sử (SQLite)')),
+              PopupMenuItem(value: 'backupSettings',
+                child: Text('Sao lưu cấu hình (JSON)')),
+              PopupMenuItem(value: 'inspectSettings',
+                child: Text('Kiểm tra tệp sao lưu cấu hình')),
               PopupMenuItem(value: 'quote',
                 child: Text('Báo giá chuyến đi')),
               PopupMenuItem(value: 'qr',
