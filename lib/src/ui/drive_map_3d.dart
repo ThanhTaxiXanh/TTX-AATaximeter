@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as gl;
 import '../domain/trip_route_point.dart';
 import 'follow_camera_gate.dart';
+import 'navigation_camera_filter.dart';
+import 'road_label_style.dart';
 
 /// GPS arrow is a native geo-referenced symbol, not a fixed HUD overlay.
 /// Native MapLibre vector map with pitch, heading-up camera and OSM buildings.
@@ -16,13 +18,14 @@ class DriveMap3D extends StatefulWidget {
     required this.latitude,
     required this.longitude,
     required this.headingDegrees,
+    required this.speedKmh,
     required this.pitchDegrees,
     required this.dark,
     required this.routePoints,
     this.flat2D = false,
   });
   final double? latitude, longitude;
-  final double headingDegrees, pitchDegrees;
+  final double headingDegrees, pitchDegrees, speedKmh;
   final bool dark;
   /// Zero-pitch vector fallback for 2D when raster tiles fail.
   final bool flat2D;
@@ -48,7 +51,12 @@ class DriveMap3DState extends State<DriveMap3D> {
   DateTime? _lastNativeRouteUpload;
   int _lastRouteCount = -1;
   TripRoutePoint? _lastRoutePoint;
-  final FollowCameraGate _cameraGate = FollowCameraGate();
+  final FollowCameraGate _cameraGate = FollowCameraGate(
+    minimumInterval: const Duration(milliseconds: 620),
+    minimumDistanceMeters: 1.8,
+    minimumBearingDegrees: 2.5,
+  );
+  final NavigationCameraFilter _visualCamera = NavigationCameraFilter();
   bool _cameraAnimating = false;
   bool _cameraQueued = false;
   bool _cameraQueuedForce = false;
@@ -64,31 +72,36 @@ class DriveMap3DState extends State<DriveMap3D> {
   double get _heading => widget.headingDegrees.isFinite
       ? widget.headingDegrees % 360 : 0;
 
-  gl.LatLng get _target {
-    if (!_hasFix) return const gl.LatLng(16.0, 107.5);
-    final lat = widget.latitude!, lon = widget.longitude!;
+  gl.LatLng _targetForPose(NavigationCameraPose pose) {
+    final lat = pose.latitude, lon = pose.longitude;
     if (widget.flat2D) return gl.LatLng(lat, lon);
-    // Shift the map target approximately 35m in front of the car so
-    // the car remains in the lower part of the navigation perspective.
-    final az = _heading * math.pi / 180;
+    // Only the VISUAL camera looks ahead; the GPS marker and metering
+    // continue using the true validated coordinates.
+    final az = pose.headingDegrees * math.pi / 180;
     const forwardMeters = 35.0;
     final north = forwardMeters * math.cos(az);
     final east = forwardMeters * math.sin(az);
     final longitudeDenominator = math.max(
-      0.1, math.cos(lat * math.pi / 180));
+        0.1, math.cos(lat * math.pi / 180));
     return gl.LatLng(
       (lat + north / 111320).clamp(-85.0, 85.0).toDouble(),
       lon + east / (111320 * longitudeDenominator),
     );
   }
 
-  gl.CameraPosition _camera() => gl.CameraPosition(
-    target: _target,
-    zoom: _hasFix ? _zoom : 5.3,
-    tilt: widget.flat2D ? 0 :
-        widget.pitchDegrees.clamp(50.0, 60.0).toDouble(),
-    bearing: widget.flat2D ? 0 : (_hasFix ? _heading : 0),
-  );
+  gl.CameraPosition _camera({NavigationCameraPose? visualPose}) {
+    final pose = visualPose ?? NavigationCameraPose(
+      latitude: widget.latitude ?? 16.0,
+      longitude: widget.longitude ?? 107.5,
+      headingDegrees: _heading);
+    return gl.CameraPosition(
+      target: _targetForPose(pose),
+      zoom: _hasFix ? _zoom : 5.3,
+      tilt: widget.flat2D ? 0 :
+          widget.pitchDegrees.clamp(50.0, 60.0).toDouble(),
+      bearing: widget.flat2D ? 0 : (_hasFix ? pose.headingDegrees : 0),
+    );
+  }
 
   @override
   void didUpdateWidget(covariant DriveMap3D oldWidget) {
@@ -103,18 +116,24 @@ class DriveMap3DState extends State<DriveMap3D> {
       _lastRouteCount = -1;
       _lastRoutePoint = null;
       _cameraGate.reset();
+      _visualCamera.reset();
       // MapLibreMap changes styleString and recreates style layers.
     }
     if (oldWidget.flat2D != widget.flat2D) {
       _followCar = true;
       _cameraGate.reset();
+      _visualCamera.reset();
     }
     if (oldWidget.flat2D != widget.flat2D ||
         oldWidget.pitchDegrees != widget.pitchDegrees ||
         oldWidget.latitude != widget.latitude ||
         oldWidget.longitude != widget.longitude ||
         oldWidget.headingDegrees != widget.headingDegrees) {
-      unawaited(_refreshArrow());
+      if (oldWidget.latitude != widget.latitude ||
+          oldWidget.longitude != widget.longitude ||
+          oldWidget.headingDegrees != widget.headingDegrees) {
+        unawaited(_refreshArrow());
+      }
       if (_followCar) _moveToCar();
     }
     if (_lastRouteCount != widget.routePoints.length ||
@@ -126,6 +145,8 @@ class DriveMap3DState extends State<DriveMap3D> {
 
   void centerOnCar() {
     _followCar = true;
+    _visualCamera.reset();
+    _cameraGate.reset();
     _moveToCar(force: true);
   }
 
@@ -170,7 +191,14 @@ class DriveMap3DState extends State<DriveMap3D> {
       _cameraQueuedForce = _cameraQueuedForce || force;
       return;
     }
-    final next = _camera();
+    final visual = _visualCamera.update(
+      at: DateTime.now(),
+      latitude: widget.latitude!,
+      longitude: widget.longitude!,
+      headingDegrees: _heading,
+      speedKmh: widget.speedKmh,
+    );
+    final next = _camera(visualPose: visual);
     if (!_cameraGate.shouldUpdate(
       at: DateTime.now(), latitude: next.target.latitude,
       longitude: next.target.longitude, bearing: next.bearing,
@@ -179,7 +207,9 @@ class DriveMap3DState extends State<DriveMap3D> {
     _cameraAnimating = true;
     unawaited(controller.animateCamera(
       gl.CameraUpdate.newCameraPosition(next),
-      duration: const Duration(milliseconds: 400),
+      // Slightly longer native interpolation bridges sparse 1 Hz GPS fixes.
+      // These interpolated pixels NEVER feed the billable GPS route.
+      duration: const Duration(milliseconds: 700),
     ).catchError((Object error) {
       debugPrint('MapLibre camera update failed: $error');
       return false;
@@ -289,6 +319,35 @@ class DriveMap3DState extends State<DriveMap3D> {
     }
   }
 
+  /// Apply once after each day/night style load. Only names of roads are
+  /// changed; road shields, arrows and POIs retain native map styling.
+  /// Viewport pitch/rotation makes labels face the phone when the car turns.
+  Future<void> _alignStreetLabels(gl.MapLibreMapController controller) async {
+    try {
+      final style = await controller.getStyle();
+      if (style == null || style.isEmpty) return;
+      final names = roadNameSymbolLayerIds(style);
+      for (final id in names) {
+        if (!mounted || !_styleReady || !identical(_map, controller)) return;
+        try {
+          await controller.setLayerProperties(
+            id,
+            const gl.SymbolLayerProperties(
+              textPitchAlignment: 'viewport',
+              textRotationAlignment: 'viewport',
+            ),
+          );
+        } catch (error) {
+          debugPrint('Road label layer $id not adjustable: $error');
+        }
+      }
+    } catch (error) {
+      // Vector map remains functional even if a remote style changes its
+      // layer schema. Never block navigation or GPS for optional labels.
+      debugPrint('Road name alignment not available: $error');
+    }
+  }
+
   Future<void> _onStyleLoaded() async {
     final controller = _map;
     if (controller == null || !mounted) return;
@@ -301,7 +360,10 @@ class DriveMap3DState extends State<DriveMap3D> {
     _lastRouteCount = -1;
     _lastRoutePoint = null;
     _cameraGate.reset();
+    _visualCamera.reset();
     if (!widget.flat2D) {
+      await _alignStreetLabels(controller);
+    }
       // Both OpenFreeMap Liberty and Dark use the OpenMapTiles "building"
       // vector source layer. Where OSM has no height, a modest 9m extrusion
       // is an illustration, not a measured real-world building height.
