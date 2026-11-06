@@ -24,12 +24,13 @@ class DashboardMap extends StatefulWidget {
     required this.headingDegrees,
     required this.onToggle3D,
     required this.onToggleDark,
+    required this.showCurrentRoadName,
     this.routePoints = const [],
     this.height = 335,
   });
   final double? latitude, longitude;
   final double speedKmh, speedLimitKmh, headingDegrees, pitchDegrees;
-  final bool is3D, dark;
+  final bool is3D, dark, showCurrentRoadName;
   final double height;
   final VoidCallback onLocate, onToggle3D, onToggleDark;
   final List<TripRoutePoint> routePoints;
@@ -53,6 +54,7 @@ class _DashboardMapState extends State<DashboardMap> {
       FollowCameraGate(minimumDistanceMeters: 3.0);
   final RasterTileFailover _tileFailover = RasterTileFailover();
   bool _vector2DFallback = false;
+  String? _currentRoadName;
   int _rasterTileEpoch = 0;
   // Route points are append-only within a trip. Rebuild polyline geometries
   // only when the number/tail changes, not on every 1-second fare tick.
@@ -73,6 +75,7 @@ class _DashboardMapState extends State<DashboardMap> {
   void didUpdateWidget(covariant DashboardMap old) {
     super.didUpdateWidget(old);
     if (old.is3D != widget.is3D) {
+      _currentRoadName = null;
       _ready = false;
       _follow = true;
       _twoDFollowGate.reset();
@@ -117,14 +120,6 @@ class _DashboardMapState extends State<DashboardMap> {
     if (!_ready) return;
     _map.move(_map.camera.center,
       (_map.camera.zoom + amount).clamp(3.0, 19.0).toDouble());
-  }
-
-  void _northUp() {
-    if (widget.is3D || _vector2DFallback) {
-      _activeVectorMap?.northUp();
-    } else if (_ready) {
-      _map.rotate(0);
-    }
   }
 
   /// A run of failed OSM raster requests is a signal to switch sources, not
@@ -360,6 +355,10 @@ class _DashboardMapState extends State<DashboardMap> {
               pitchDegrees: widget.pitchDegrees,
               dark: widget.dark,
               routePoints: widget.routePoints,
+              onRoadNameChanged: (value) {
+                if (!mounted || value == _currentRoadName) return;
+                setState(() => _currentRoadName = value);
+              },
             )
           : _twoD(),
         ),
@@ -415,9 +414,6 @@ class _DashboardMapState extends State<DashboardMap> {
               widget.onToggleDark,
               widget.dark ? 'Chuyển bản đồ sáng'
                   : 'Chuyển bản đồ tối'),
-            _button(const Icon(Icons.explore_outlined,
-                color: DriverProColors.cyan, size: 21),
-              _northUp, 'Đưa bản đồ về hướng Bắc'),
             _button(const Icon(Icons.my_location_rounded,
                 color: DriverProColors.cyan, size: 21),
               _center, 'Về vị trí xe'),
@@ -429,6 +425,33 @@ class _DashboardMapState extends State<DashboardMap> {
               () => _zoom(-1), 'Thu nhỏ'),
           ]),
         ),
+        if (widget.showCurrentRoadName)
+          Positioned(left: 111, right: 8, bottom: 14,
+            child: IgnorePointer(child: Container(
+              constraints: const BoxConstraints(minHeight: 42),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xF0091929),
+                border: Border.all(color: DriverProColors.green, width: 1.6),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: const [BoxShadow(
+                  color: Color(0x65000000), blurRadius: 10)],
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.signpost_outlined,
+                  color: DriverProColors.green, size: 18),
+                const SizedBox(width: 8),
+                Expanded(child: Text(_currentRoadName ??
+                    (_hasFix ? 'Đang xác định tên đường...'
+                        : 'Đang chờ vị trí GPS'),
+                  maxLines: 2, overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: _currentRoadName == null
+                      ? DriverProColors.muted : Colors.white,
+                    fontWeight: FontWeight.w800, fontSize: 12.5))),
+              ]),
+            )),
+          ),
         Positioned(left: 8, bottom: 8, child: _speedPanel()),
         if (!widget.is3D && !_vector2DFallback)
           const Positioned(right: 5, bottom: 3,
