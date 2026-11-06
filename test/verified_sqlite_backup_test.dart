@@ -6,6 +6,8 @@ import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:ttx_aataximeter/src/core/taximeter_engine.dart';
 import 'package:ttx_aataximeter/src/data/trip_repository.dart';
+import 'package:ttx_aataximeter/src/data/settings_backup_bundle.dart';
+import 'package:ttx_aataximeter/src/data/unified_backup_bundle.dart';
 import 'package:ttx_aataximeter/src/data/trip_session_snapshot.dart';
 import 'package:ttx_aataximeter/src/domain/trip_record.dart';
 import 'package:ttx_aataximeter/src/domain/trip_route_point.dart';
@@ -59,6 +61,17 @@ void main() {
       expect(inspected.completedTripCount, 1);
       expect(inspected.hasActiveTrip, isTrue);
       expect(inspected.activeRouteCount, 2);
+
+      final combined = UnifiedBackupBundle.fromParts(
+        settings: SettingsBackupBundle.fromValues(const {}),
+        sqliteBytes: await backup.readAsBytes(),
+      );
+      final extracted = UnifiedBackupBundle.decode(combined.encode());
+      final fromArchive = File(path.join(folder.path, 'extracted.db'));
+      await fromArchive.writeAsBytes(extracted.sqliteBytes, flush: true);
+      final archiveCheck = await TripRepository.inspectBackupFile(fromArchive);
+      expect(archiveCheck.completedTripCount, 1);
+      expect(archiveCheck.activeRouteCount, 2);
 
       restored = TripRepository(databasePath: backup.path);
       final history = await restored.listTrips();
