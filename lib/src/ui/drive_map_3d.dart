@@ -146,6 +146,10 @@ class DriveMap3DState extends State<DriveMap3D> {
         unawaited(_updateCurrentRoad());
       }
     }
+    if (oldWidget.onRoadNameChanged == null &&
+        widget.onRoadNameChanged != null) {
+      unawaited(_updateCurrentRoad(force: true));
+    }
     if (_lastRouteCount != widget.routePoints.length ||
         !identical(_lastRoutePoint,
             widget.routePoints.isEmpty ? null : widget.routePoints.last)) {
