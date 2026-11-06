@@ -2127,8 +2127,13 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           preview.archiveOnlySettings == 0 &&
           !vietQrPlan.hasChanges &&
           (priorJournal == null || !priorJournal.needsReview)) {
-        _notify('Không có chuyến hoặc cấu hình mới cần nhập. '
-          'Dữ liệu hiện tại được giữ nguyên.');
+        // Prior app versions could have persisted VietQR to preferences but
+        // left the already-running UI with a stale empty BankBook.
+        if (deviceBookRaw != null && mounted) {
+          setState(() => _bankBook = BankBook.decode(deviceBookRaw));
+        }
+        _notify('Không có dữ liệu mới cần nhập. '
+          'Đã đồng bộ lại tài khoản VietQR nếu có trên máy.');
         return;
       }
       if (!mounted) return;
