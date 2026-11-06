@@ -276,35 +276,35 @@ class DriverProQuoteCard extends StatelessWidget {
       child: Opacity(
         opacity: onPressed == null ? 0.55 : 1.0,
         child: DriverProPanel(
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 14),
-        child: Row(children: [
-          Container(
-            width: 40, height: 40,
-            decoration: BoxDecoration(
-              color: const Color(0xFF07364E),
-              borderRadius: BorderRadius.circular(12),
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 14),
+          child: Row(children: [
+            Container(
+              width: 40, height: 40,
+              decoration: BoxDecoration(
+                color: const Color(0xFF07364E),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              alignment: Alignment.center,
+              child: const Icon(Icons.calculate_outlined,
+                color: DriverProColors.cyan, size: 23),
             ),
-            alignment: Alignment.center,
-            child: const Icon(Icons.calculate_outlined,
-              color: DriverProColors.cyan, size: 23),
-          ),
-          const SizedBox(width: 11),
-          const Expanded(child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Báo giá chuyến đi',
-                style: TextStyle(
-                  color: Colors.white, fontSize: 15,
-                  fontWeight: FontWeight.w800)),
-              SizedBox(height: 3),
-              Text('Ước tính cước / giá trọn gói',
-                style: TextStyle(
-                  color: DriverProColors.muted, fontSize: 12)),
-            ],
-          )),
-          const Icon(Icons.chevron_right_rounded,
-            color: DriverProColors.cyan, size: 25),
-        ]),
+            const SizedBox(width: 11),
+            const Expanded(child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Báo giá chuyến đi',
+                  style: TextStyle(
+                    color: Colors.white, fontSize: 15,
+                    fontWeight: FontWeight.w800)),
+                SizedBox(height: 3),
+                Text('Ước tính cước / giá trọn gói',
+                  style: TextStyle(
+                    color: DriverProColors.muted, fontSize: 12)),
+              ],
+            )),
+            const Icon(Icons.chevron_right_rounded,
+              color: DriverProColors.cyan, size: 25),
+          ]),
         ),
       ),
     ),
