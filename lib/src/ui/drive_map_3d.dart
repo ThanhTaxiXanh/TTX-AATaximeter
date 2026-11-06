@@ -344,16 +344,38 @@ class DriveMap3DState extends State<DriveMap3D> {
         try {
           await controller.setLayerProperties('background',
             const gl.BackgroundLayerProperties(
-              backgroundColor: '#0D1A29'));
+              backgroundColor: '#1B2B49'));
         } catch (error) {
           debugPrint('Map background cannot be adjusted: $error');
+        }
+        // The native Dark style has many almost-black landuse polygons;
+        // recoloring background alone leaves a nearly black map.
+        for (final entry in darkSurfaceLayerColors(style).entries) {
+          if (!mounted || !_styleReady || !identical(_map, controller)) return;
+          try {
+            await controller.setLayerProperties(
+              entry.key, gl.FillLayerProperties(fillColor: entry.value));
+          } catch (error) {
+            debugPrint('Dark surface ${entry.key}: $error');
+          }
         }
         final colors = darkRoadLayerColors(style);
         for (final entry in colors.entries) {
           if (!mounted || !_styleReady || !identical(_map, controller)) return;
           try {
+            final isInner = entry.key == 'highway_minor' ||
+                entry.key == 'highway_major_inner' ||
+                entry.key == 'highway_motorway_inner';
             await controller.setLayerProperties(
-              entry.key, gl.LineLayerProperties(lineColor: entry.value));
+              entry.key, gl.LineLayerProperties(
+                lineColor: entry.value,
+                // Reference uses broad slate-blue streets instead of
+                // very fine pale wireframe lines at navigation zoom.
+                lineWidth: isInner ? [
+                  'interpolate', ['linear'], ['zoom'],
+                  12, 1.5, 14, 3.2, 16, 7.5, 18, 13.5, 20, 24
+                ] : null,
+              ));
           } catch (error) {
             debugPrint('Road contrast ${entry.key}: $error');
           }
@@ -380,6 +402,73 @@ class DriveMap3DState extends State<DriveMap3D> {
     } catch (error) {
       // Network tiles and GPS continue even if an external style changes.
       debugPrint('Optional road styling unavailable: $error');
+    }
+  }
+
+  /// Add an explicit on-road name layer ABOVE 3D buildings.
+  /// Native Dark's highway_name_other is only 10px and frequently hidden
+  /// by symbol collisions. The new layer draws named OSM road segments
+  /// in the road geometry itself, in Vietnamese when present.
+  Future<void> _installReadableRoadLabels(
+      gl.MapLibreMapController controller) async {
+    try {
+      await controller.addSymbolLayer(
+        'openmaptiles',
+        'ttx-3d-readable-road-names',
+        gl.SymbolLayerProperties(
+          symbolPlacement: 'line',
+          symbolSpacing: 145,
+          textField: [
+            'coalesce',
+            ['get', 'name:vi'],
+            ['get', 'name'],
+            ['get', 'name:nonlatin'],
+            ['get', 'name:latin'],
+            ['get', 'ref'],
+            ''
+          ],
+          textFont: ['Noto Sans Regular'],
+          textSize: [
+            'interpolate', ['linear'], ['zoom'],
+            12, 12, 15, 15, 18, 19
+          ],
+          textColor: widget.dark ? '#F6F8FE' : '#35465C',
+          textHaloColor: widget.dark ? '#182A4C' : '#FFFFFF',
+          textHaloWidth: 1.8,
+          textHaloBlur: 0.2,
+          textPitchAlignment: 'viewport',
+          // The text stays vertically upright in perspective while
+          // tracking the road line, matching the provided example.
+          textRotationAlignment: 'map',
+          textKeepUpright: true,
+          textMaxAngle: 45,
+          textAllowOverlap: false,
+          textIgnorePlacement: false,
+        ),
+        sourceLayer: 'transportation_name',
+        minzoom: 12,
+        filter: ['any',
+          ['has', 'name'], ['has', 'name:vi'],
+          ['has', 'name:nonlatin'], ['has', 'name:latin'],
+          ['has', 'ref']],
+      );
+      // Avoid two labels for the same segment. Only hide native labels
+      // if the replacement was created successfully.
+      if (mounted && identical(_map, controller) && _styleReady) {
+        final style = await controller.getStyle();
+        if (style != null && style.isNotEmpty) {
+          for (final id in roadNameSymbolLayerIds(style)) {
+            try {
+              await controller.setLayerVisibility(id, false);
+            } catch (error) {
+              debugPrint('Original street name $id remains enabled: $error');
+            }
+          }
+        }
+      }
+    } catch (error) {
+      // If adding the overlay fails, the improved original labels remain.
+      debugPrint('Custom road-name overlay unavailable: $error');
     }
   }
 
@@ -434,8 +523,8 @@ class DriveMap3DState extends State<DriveMap3D> {
           'openmaptiles',
           'ttx-3d-buildings',
           gl.FillExtrusionLayerProperties(
-            fillExtrusionColor: widget.dark ? '#46546b' : '#b4afa5',
-            fillExtrusionOpacity: 0.88,
+            fillExtrusionColor: widget.dark ? '#465876' : '#b4afa5',
+            fillExtrusionOpacity: widget.dark ? 0.72 : 0.88,
             fillExtrusionHeight: [
               'coalesce', ['get', 'render_height'], 9
             ],
@@ -451,6 +540,7 @@ class DriveMap3DState extends State<DriveMap3D> {
         debugPrint('3D building layer not available: $error');
       }
     }
+    await _installReadableRoadLabels(controller);
     try {
       await controller.addGeoJsonSource('ttx-route', _routeGeoJson());
       await controller.addLineLayer(
