@@ -110,10 +110,17 @@ class BackupLogoCapture {
       }
       final resolved = await file.resolveSymbolicLinks();
       final ext = path.extension(raw).replaceFirst('.', '').toLowerCase();
+      final name = path.basename(resolved);
+      final prefix = '${item.key}_restored_';
+      final suffix = '.$ext';
+      final isRestoredName = name.startsWith(prefix) &&
+          name.endsWith(suffix) &&
+          name.length == prefix.length + 24 + suffix.length &&
+          RegExp(r'^[a-f0-9]{24}').hasMatch(
+            name.substring(prefix.length, prefix.length + 24));
       if (path.dirname(resolved) != actualDir ||
           !BackupLogoAsset.allowedExtensions.contains(ext) ||
-          !(path.basename(resolved) == '${item.key}.$ext' ||
-            RegExp('^${item.key}_restored_[a-f0-9]{24}\\.$ext' + r'
+          (name != '${item.key}.$ext' && !isRestoredName)) {
         throw FormatException(
           'Đường dẫn logo ${item.key} không thuộc thư mục ứng dụng');
       }
