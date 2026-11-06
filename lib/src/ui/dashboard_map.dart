@@ -74,7 +74,8 @@ class _DashboardMapState extends State<DashboardMap> {
   @override
   void didUpdateWidget(covariant DashboardMap old) {
     super.didUpdateWidget(old);
-    if (old.is3D != widget.is3D) {
+    if (old.is3D != widget.is3D ||
+        old.showCurrentRoadName != widget.showCurrentRoadName) {
       _currentRoadName = null;
       _ready = false;
       _follow = true;
@@ -355,10 +356,12 @@ class _DashboardMapState extends State<DashboardMap> {
               pitchDegrees: widget.pitchDegrees,
               dark: widget.dark,
               routePoints: widget.routePoints,
-              onRoadNameChanged: (value) {
-                if (!mounted || value == _currentRoadName) return;
-                setState(() => _currentRoadName = value);
-              },
+              onRoadNameChanged: widget.showCurrentRoadName
+                ? (value) {
+                    if (!mounted || value == _currentRoadName) return;
+                    setState(() => _currentRoadName = value);
+                  }
+                : null,
             )
           : _twoD(),
         ),
