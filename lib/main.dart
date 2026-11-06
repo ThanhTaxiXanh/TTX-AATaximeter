@@ -21,6 +21,7 @@ import 'src/data/settings_backup_bundle.dart';
 import 'src/data/unified_backup_bundle.dart';
 import 'src/data/backup_difference_preview.dart';
 import 'src/data/backup_settings_importer.dart';
+import 'src/data/pre_import_backup_vault.dart';
 import 'src/data/backup_logo_asset.dart';
 import 'src/domain/trip_record.dart';
 import 'src/domain/trip_route_point.dart';
@@ -126,6 +127,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   bool _settingsBackupBusy = false;
   bool _unifiedBackupBusy = false;
   bool _importBackupBusy = false;
+  bool _vaultExportBusy = false;
   bool _savingNewTrip = false;
   DateTime _lastCheckpoint = DateTime.fromMillisecondsSinceEpoch(0);
   Future<void> _writeQueue = Future<void>.value();
@@ -875,6 +877,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   }
 
   Future<bool> _saveNewTrip() async {
+    if (_importBackupBusy) return false;
     _savingNewTrip = true;
     try {
       await _writeQueue;
@@ -1009,7 +1012,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   }
 
   Future<void> _flatFareDialog() async {
-    if (meter.status != MeterStatus.idle || !_storageReady) {
+    if (meter.status != MeterStatus.idle || !_storageReady ||
+        _importBackupBusy) {
       _notify('Hoàn thành chuyến hiện tại và chờ dữ liệu sẵn sàng trước khi báo giá');
       return;
     }
@@ -1022,7 +1026,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     );
     if (!mounted || quote == null || quote.amount <= 0) return;
     if (!await _requestLocationReady()) return;
-    if (!mounted || !_appVisible || meter.status != MeterStatus.idle) return;
+    if (!mounted || !_appVisible || meter.status != MeterStatus.idle ||
+        _importBackupBusy) return;
     final now = DateTime.now();
     _tripPickup = quote.pickup;
     _tripDropoff = quote.dropoff;
@@ -2194,6 +2199,123 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     }
   }
 
+  /// Browse and export a verified private pre-import safety snapshot.
+  /// The original copy stays in private app storage and is never overwritten.
+  Future<void> _exportPreImportSafetyCopy() async {
+    if (_vaultExportBusy || _importBackupBusy ||
+        _unifiedBackupBusy || _settingsBackupBusy || _exportingBackup) return;
+    if (meter.status == MeterStatus.running ||
+        meter.status == MeterStatus.paused) {
+      _notify('Hãy hoàn thành chuyến trước khi xuất bản dự phòng.');
+      return;
+    }
+    setState(() => _vaultExportBusy = true);
+    try {
+      final support = await getApplicationSupportDirectory();
+      final entries = await PreImportBackupVault.list(support);
+      if (!mounted) return;
+      if (entries.isEmpty) {
+        _notify('Chưa có bản dự phòng trước khi nhập trên điện thoại này.');
+        return;
+      }
+      final selected = await showModalBottomSheet<PreImportSafetyFile>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        builder: (sheet) => SafeArea(
+          child: SizedBox(
+            height: MediaQuery.sizeOf(sheet).height * 0.64,
+            child: Column(children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(18, 8, 18, 6),
+                child: Text('Bản dự phòng trước khi nhập',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+                child: Text(
+                  'Các bản này nằm trong dữ liệu riêng của ứng dụng. '
+                  'Chọn một bản để kiểm tra và lưu ra nơi khác trước khi '
+                  'gỡ ứng dụng hoặc chuyển điện thoại.',
+                  textAlign: TextAlign.center),
+              ),
+              Expanded(child: ListView.separated(
+                itemCount: entries.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (ctx, index) {
+                  final entry = entries[index];
+                  final time = entry.modifiedAt.toLocal();
+                  String two(int n) => n.toString().padLeft(2, '0');
+                  final displayDate =
+                      '${two(time.day)}/${two(time.month)}/${time.year} '
+                      '${two(time.hour)}:${two(time.minute)}';
+                  final megabytes =
+                      (entry.byteLength / (1024 * 1024)).toStringAsFixed(1);
+                  return ListTile(
+                    leading: const Icon(Icons.shield_outlined),
+                    title: Text(displayDate),
+                    subtitle: Text('$megabytes MiB — Chạm để kiểm tra'),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.pop(sheet, entry),
+                  );
+                },
+              )),
+            ]),
+          ),
+        ),
+      );
+      if (selected == null || !mounted) return;
+      final verified = await PreImportBackupVault.verify(
+        entry: selected,
+        temporaryDirectory: await getTemporaryDirectory());
+      if (!mounted) return;
+      final approved = await showDialog<bool>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: const Text('Bản dự phòng hợp lệ'),
+          content: Text(
+            'Tạo lúc (UTC): ${verified.createdAtUtc.toIso8601String()}\n'
+            'Chuyến hoàn tất: ${verified.completedTrips}\n'
+            'Nhóm cấu hình: ${verified.settingsCount}\n'
+            'Logo VietQR: ${verified.logoCount}\n'
+            'Chuyến dở dang: ${verified.activeTripSkipped ? "Có" : "Không"}\n\n'
+            'Đã kiểm tra gói sao lưu và tính toàn vẹn của SQLite. '
+            'Đây là bản dự phòng từ trước khi nhập dữ liệu; '
+            'xuất tệp không phục hồi hoặc thay thế dữ liệu đang có. '
+            'Tệp chứa lịch sử GPS và thông tin VietQR không mã hóa.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Hủy')),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('Xuất tệp ra ngoài')),
+          ],
+        ),
+      );
+      if (approved != true || !mounted) return;
+      final date = verified.createdAtUtc.toLocal();
+      String two(int n) => n.toString().padLeft(2, '0');
+      final filename = 'TTX_TruocNhap_'
+          '${date.year}${two(date.month)}${two(date.day)}_'
+          '${two(date.hour)}${two(date.minute)}${two(date.second)}.ttxbackup';
+      final destination = await FilePicker.saveFile(
+        dialogTitle: 'Lưu bản dự phòng trước khi nhập',
+        fileName: filename,
+        bytes: verified.bytes,
+      );
+      if (mounted) {
+        _notify(destination == null
+          ? 'Đã hủy xuất; bản dự phòng trên máy vẫn được giữ nguyên.'
+          : 'Đã xuất bản dự phòng. Cất giữ ở nơi riêng tư, an toàn.');
+      }
+    } catch (error) {
+      if (mounted) _notify('Không thể xuất bản dự phòng: $error');
+    } finally {
+      if (mounted) setState(() => _vaultExportBusy = false);
+    }
+  }
+
   Future<void> _settingsMenu() async {
     final item = await showModalBottomSheet<String>(
       context: context, showDragHandle: true,
@@ -2219,6 +2341,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           title: const Text('Nhập bản sao lưu (.ttxbackup)'),
           subtitle: const Text('Bổ sung dữ liệu, không ghi đè chuyến cũ'),
           onTap: () => Navigator.pop(context, 'importCombined')),
+        ListTile(leading: const Icon(Icons.shield_outlined),
+          title: const Text('Xuất bản dự phòng trước khi nhập'),
+          subtitle: const Text('Kiểm tra và lưu bản gốc ra ngoài ứng dụng'),
+          onTap: () => Navigator.pop(context, 'exportSafety')),
         ListTile(leading: const Icon(Icons.settings_backup_restore_outlined),
           title: const Text('Sao lưu cấu hình (JSON)'),
           subtitle: const Text('Bảng giá, xe, VietQR và bản đồ'),
@@ -2241,6 +2367,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         await _backupCombined();
       case 'importCombined':
         await _importCombinedBackup();
+      case 'exportSafety':
+        await _exportPreImportSafetyCopy();
     }
   }
 
@@ -2263,6 +2391,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         return;
       case 'importCombined':
         _importCombinedBackup();
+        return;
+      case 'exportSafety':
+        _exportPreImportSafetyCopy();
         return;
       case 'inspectCombined':
         _inspectCombinedBackup();
@@ -2337,6 +2468,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                 child: Text('Sao lưu gộp dữ liệu (.ttxbackup)')),
               PopupMenuItem(value: 'importCombined',
                 child: Text('Nhập bản sao lưu (.ttxbackup)')),
+              PopupMenuItem(value: 'exportSafety',
+                child: Text('Xuất bản dự phòng trước khi nhập')),
               PopupMenuItem(value: 'inspectCombined',
                 child: Text('Kiểm tra gói dữ liệu (.ttxbackup)')),
               PopupMenuItem(value: 'inspectSettings',
