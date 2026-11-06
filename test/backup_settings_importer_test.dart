@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:ttx_aataximeter/src/data/backup_logo_asset.dart';
 import 'package:ttx_aataximeter/src/data/backup_settings_importer.dart';
 import 'package:ttx_aataximeter/src/data/settings_backup_bundle.dart';
@@ -10,6 +12,11 @@ import 'package:ttx_aataximeter/src/domain/dashboard_preferences.dart';
 import 'package:ttx_aataximeter/src/payment/bank_book.dart';
 
 void main() {
+  setUp(() {
+    SharedPreferencesAsyncPlatform.instance =
+        InMemorySharedPreferencesAsync.empty();
+  });
+
   test('settings import plan never picks an already present configuration',
       () {
     final archive = SettingsBackupBundle.fromValues({
