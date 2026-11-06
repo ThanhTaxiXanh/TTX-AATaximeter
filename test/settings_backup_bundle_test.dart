@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:ttx_aataximeter/src/core/taximeter_engine.dart';
 import 'package:ttx_aataximeter/src/data/settings_backup_bundle.dart';
 import 'package:ttx_aataximeter/src/data/tariff_codec.dart';
@@ -12,6 +14,10 @@ import 'package:ttx_aataximeter/src/payment/bank_book.dart';
 import 'package:ttx_aataximeter/src/payment/vietqr.dart';
 
 void main() {
+  setUp(() {
+    SharedPreferencesAsyncPlatform.instance =
+        InMemorySharedPreferencesAsync.empty();
+  });
   test('settings export preserves user configuration and VietQR exactly',
       () {
     final account = const VietQrAccount(
