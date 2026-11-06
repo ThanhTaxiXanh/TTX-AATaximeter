@@ -332,9 +332,13 @@ class DriveMap3DState extends State<DriveMap3D> {
         try {
           await controller.setLayerProperties(
             id,
-            const gl.SymbolLayerProperties(
+            gl.SymbolLayerProperties(
               textPitchAlignment: 'viewport',
               textRotationAlignment: 'viewport',
+              // Subtle contrast keeps names legible on tilted 3D roads
+              // without altering their source text or placement geometry.
+              textHaloColor: widget.dark ? '#071018' : '#FFFFFF',
+              textHaloWidth: 1.0,
             ),
           );
         } catch (error) {
