@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -102,10 +103,93 @@ void main() {
       expect((await restored.listTrips()).single.id, finished.id);
       expect(TripSessionSnapshot.decode((await restored.loadActive())!)
           .routePoints.length, 2);
+      final currentInfo = await source.inspectCurrentData();
+      final backupInfo = await TripRepository.inspectBackupFile(backup);
+      expect(currentInfo.completedTripDigests, isEmpty);
+      expect(currentInfo.hasActiveTrip, false);
+      expect(backupInfo.completedTripDigests.keys, contains(finished.id));
+      expect(backupInfo.activeRouteCount, 2);
     } finally {
       if (restored != null) await restored.dispose();
       if (source != null) await source.dispose();
       await folder.delete(recursive: true);
     }
   });
+
+  test('preflight rejects SQLite GPS coordinates outside the valid range',
+      () async {
+    final folder = await Directory.systemTemp.createTemp('ttx-bad-gps-');
+    final databasePath = path.join(folder.path, 'bad-gps.db');
+    TripRepository? repo;
+    try {
+      repo = TripRepository(databasePath: databasePath);
+      final at = DateTime.utc(2026, 11, 6, 9);
+      final engine = TaximeterEngine(tariff: TariffConfig.demo())
+        ..start(at: at);
+      final snapshot = TripSessionSnapshot.fromEngine(engine);
+      await repo.beginActive(snapshot);
+      await repo.saveActiveIncremental(
+        snapshot: snapshot,
+        routeStartIndex: 0,
+        appendedPoints: [
+          TripRoutePoint(
+            latitude: 21.028, longitude: 105.834,
+            recordedAt: at, accuracyMeters: 4, speedKmh: 20),
+        ],
+      );
+      await repo.dispose();
+      repo = null;
+      final db = await openDatabase(databasePath);
+      try {
+        await db.rawUpdate(
+          'UPDATE active_trip_route SET latitude = 100 '
+          'WHERE sequence = 0');
+      } finally {
+        await db.close();
+      }
+      await expectLater(
+        TripRepository.inspectBackupFile(File(databasePath)),
+        throwsFormatException,
+      );
+    } finally {
+      if (repo != null) await repo.dispose();
+      await folder.delete(recursive: true);
+    }
+  });
+
+  test('preflight rejects a receipt payload with mismatched SQLite ID',
+      () async {
+    final folder = await Directory.systemTemp.createTemp('ttx-bad-id-');
+    final dbPath = path.join(folder.path, 'bad-receipt.db');
+    TripRepository? repo;
+    try {
+      repo = TripRepository(databasePath: dbPath);
+      final at = DateTime.utc(2026, 11, 6, 10);
+      final engine = TaximeterEngine(tariff: TariffConfig.demo())
+        ..start(at: at);
+      final record = TripRecord.fromReceipt(engine.finish(
+        at: at.add(const Duration(minutes: 10))));
+      await repo.save(record);
+      await repo.dispose();
+      repo = null;
+      final db = await openDatabase(dbPath);
+      try {
+        final altered = Map<String, dynamic>.from(
+          jsonDecode(record.encode()) as Map)
+          ..['id'] = 'different-trip-id';
+        await db.update('trips', {'payload': jsonEncode(altered)},
+          where: 'id = ?', whereArgs: [record.id]);
+      } finally {
+        await db.close();
+      }
+      await expectLater(
+        TripRepository.inspectBackupFile(File(dbPath)),
+        throwsFormatException,
+      );
+    } finally {
+      if (repo != null) await repo.dispose();
+      await folder.delete(recursive: true);
+    }
+  });
+
 }
