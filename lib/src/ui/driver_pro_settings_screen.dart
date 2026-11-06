@@ -128,7 +128,12 @@ class _DriverProSettingsScreenState extends State<DriverProSettingsScreen> {
       color: DriverProColors.panel,
       border: Border.all(color: DriverProColors.border),
       borderRadius: BorderRadius.circular(18)),
-    child: child,
+    child: Material(
+      type: MaterialType.transparency,
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: child,
+    ),
   );
 
   Widget _switch(String name, String explanation, bool value,
