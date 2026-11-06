@@ -376,7 +376,8 @@ class TripRepository {
     final database = await openDatabase(
       file.path, readOnly: true, singleInstance: false);
     try {
-      return _inspectData(database);
+      // Wait for every async query before closing the read-only connection.
+      return await _inspectData(database);
     } finally {
       await database.close();
     }
