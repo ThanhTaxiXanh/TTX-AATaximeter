@@ -15,6 +15,9 @@ List<String> roadNameSymbolLayerIds(String styleJson) {
         raw['id'] is! String) continue;
     final id = raw['id'] as String;
     final name = id.toLowerCase();
+    // Runtime TTX overlay has the same road-name source, but it must NOT
+    // be treated as an original layer when hiding duplicate native labels.
+    if (name.startsWith('ttx-')) continue;
     if ((name.contains('highway-name') ||
          name.contains('highway_name') ||
          name.contains('road-name') ||
