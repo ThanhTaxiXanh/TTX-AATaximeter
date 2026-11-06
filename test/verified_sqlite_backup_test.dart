@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as path;
@@ -7,6 +8,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:ttx_aataximeter/src/core/taximeter_engine.dart';
 import 'package:ttx_aataximeter/src/data/trip_repository.dart';
 import 'package:ttx_aataximeter/src/data/settings_backup_bundle.dart';
+import 'package:ttx_aataximeter/src/data/backup_logo_asset.dart';
 import 'package:ttx_aataximeter/src/data/unified_backup_bundle.dart';
 import 'package:ttx_aataximeter/src/data/trip_session_snapshot.dart';
 import 'package:ttx_aataximeter/src/domain/trip_record.dart';
@@ -65,8 +67,17 @@ void main() {
       final combined = UnifiedBackupBundle.fromParts(
         settings: SettingsBackupBundle.fromValues(const {}),
         sqliteBytes: await backup.readAsBytes(),
+        logos: [
+          BackupLogoAsset(
+            slot: 'center', extension: 'png',
+            bytes: Uint8List.fromList(
+              const [137, 80, 78, 71, 13, 10, 26, 10, 5]),
+          ),
+        ],
       );
       final extracted = UnifiedBackupBundle.decode(combined.encode());
+      expect(extracted.logos, hasLength(1));
+      expect(extracted.logos.single.slot, 'center');
       final fromArchive = File(path.join(folder.path, 'extracted.db'));
       await fromArchive.writeAsBytes(extracted.sqliteBytes, flush: true);
       final archiveCheck = await TripRepository.inspectBackupFile(fromArchive);
