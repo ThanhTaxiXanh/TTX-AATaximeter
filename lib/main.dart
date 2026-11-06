@@ -1812,8 +1812,10 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       builder: (ctx) => AlertDialog(
         title: const Text('Sao lưu cấu hình ứng dụng'),
         content: const Text(
-          'Xuất bảng giá, thông tin xe, thiết lập bản đồ và tài khoản VietQR '
-          'đã lưu thành tệp JSON riêng. '
+          'Xuất đầy đủ cấu hình đã lưu gồm xe/biển số, hãng xe, '
+          'toàn bộ bảng giá, lựa chọn bản đồ 2D/3D/sáng/tối, '
+          'tên đường, lời chào, tùy chọn HUD và tài khoản VietQR '
+          'thành một tệp JSON riêng. '
           'Tệp chứa thông tin tài khoản ngân hàng ở dạng văn bản, '
           'không mã hóa: chỉ lưu ở vị trí riêng tư đáng tin cậy. '
           'Tệp này không chứa lịch sử SQLite hoặc ảnh logo; '
@@ -1925,7 +1927,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           'và TOÀN BỘ cấu hình người dùng đã lưu: Xe & hồ sơ '
           '(hãng xe, biển số, loại xe), Cước phí & chuyến đi '
           '(bảng giá, biểu giá đang chọn), bản đồ 2D/3D, sáng/tối, '
-          'góc nghiêng, tên đường, lời chào và thanh toán VietQR. '
+          'góc nghiêng, tên đường, lời chào, chế độ HUD kính lái '
+          'và thanh toán VietQR. '
           'Gói có SHA-256 phát hiện lỗi dữ liệu nhưng KHÔNG mã hóa. '
           'Tài khoản ngân hàng và lịch sử vị trí có thể đọc được, '
           'nên chỉ lưu ở nơi riêng tư đáng tin cậy. '
