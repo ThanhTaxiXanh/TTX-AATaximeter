@@ -80,9 +80,12 @@ void main() {
       await tester.enterText(
         find.byKey(const Key('bank-account-owner-field')),
         'nguyễn văn a');
-      expect((tester.widget<TextField>(
-        find.byKey(const Key('bank-account-owner-field')))
-        .controller!.text, 'NGUYỄN VĂN A');
+      expect(
+        tester.widget<TextField>(
+          find.byKey(const Key('bank-account-owner-field')))
+          .controller!.text,
+        'NGUYỄN VĂN A',
+      );
       await tester.ensureVisible(find.text('Lưu'));
       await tester.tap(find.text('Lưu'));
       await tester.pumpAndSettle();
