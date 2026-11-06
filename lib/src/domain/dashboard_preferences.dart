@@ -8,11 +8,12 @@ class DashboardPreferences {
     this.default3D = false,
     this.auto3DOnStart = true,
     this.darkMap = false,
+    this.showCurrentRoadName = true,
     this.pitchDegrees = 60.0,
   });
   static const storageKey = 'ttx_dashboard_preferences_v1';
   final String welcome, thanks;
-  final bool default3D, auto3DOnStart, darkMap;
+  final bool default3D, auto3DOnStart, darkMap, showCurrentRoadName;
   final double pitchDegrees;
 
   /// MapLibre pitch currently reaches 60 degrees, even when 70-80 is saved.
@@ -21,6 +22,7 @@ class DashboardPreferences {
   DashboardPreferences copyWith({
     String? welcome, String? thanks,
     bool? default3D, bool? auto3DOnStart, bool? darkMap,
+    bool? showCurrentRoadName,
     double? pitchDegrees,
   }) => DashboardPreferences(
     welcome: welcome ?? this.welcome,
@@ -28,6 +30,7 @@ class DashboardPreferences {
     default3D: default3D ?? this.default3D,
     auto3DOnStart: auto3DOnStart ?? this.auto3DOnStart,
     darkMap: darkMap ?? this.darkMap,
+    showCurrentRoadName: showCurrentRoadName ?? this.showCurrentRoadName,
     pitchDegrees: pitchDegrees ?? this.pitchDegrees,
   );
 
@@ -36,6 +39,7 @@ class DashboardPreferences {
     'welcome': welcome, 'thanks': thanks,
     'default3D': default3D, 'auto3DOnStart': auto3DOnStart,
     'darkMap': darkMap, 'pitchDegrees': pitchDegrees,
+    'showCurrentRoadName': showCurrentRoadName,
   };
   String encode() => jsonEncode(toJson());
 
@@ -58,6 +62,7 @@ class DashboardPreferences {
       default3D: data['default3D'] == true,
       auto3DOnStart: data['auto3DOnStart'] != false,
       darkMap: data['darkMap'] == true,
+      showCurrentRoadName: data['showCurrentRoadName'] != false,
       pitchDegrees: pitch,
     );
   }
