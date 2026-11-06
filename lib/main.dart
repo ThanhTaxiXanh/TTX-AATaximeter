@@ -23,6 +23,7 @@ import 'src/data/settings_backup_bundle.dart';
 import 'src/data/unified_backup_bundle.dart';
 import 'src/data/backup_difference_preview.dart';
 import 'src/data/backup_settings_importer.dart';
+import 'src/data/vietqr_merge_plan.dart';
 import 'src/data/backup_import_postflight.dart';
 import 'src/data/backup_import_journal.dart';
 import 'src/data/pre_import_backup_vault.dart';
@@ -2111,8 +2112,20 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         device: live,
         archiveSettings: archive.settings,
         deviceSettings: liveSettings);
+      final incomingBookRaw = archive.settings['ttx_vietqr_bank_book_v1'];
+      final deviceBookRaw = liveSettings.settings['ttx_vietqr_bank_book_v1'];
+      final vietQrPlan = incomingBookRaw == null
+          ? VietQrMergePlan.compare(
+              device: const BankBook(), archive: const BankBook(),
+              logos: const [])
+          : VietQrMergePlan.compare(
+              device: deviceBookRaw == null
+                ? const BankBook() : BankBook.decode(deviceBookRaw),
+              archive: BankBook.decode(incomingBookRaw),
+              logos: archive.logos);
       if (preview.archiveOnlyTrips == 0 &&
           preview.archiveOnlySettings == 0 &&
+          !vietQrPlan.hasChanges &&
           (priorJournal == null || !priorJournal.needsReview)) {
         _notify('Không có chuyến hoặc cấu hình mới cần nhập. '
           'Dữ liệu hiện tại được giữ nguyên.');
@@ -2128,6 +2141,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             'hóa đơn.\n\n'
             'Sẽ bổ sung: ${preview.archiveOnlyTrips} chuyến đi và tối đa '
             '${preview.archiveOnlySettings} nhóm cấu hình.\n'
+            'Tài khoản VietQR sẽ bổ sung: ${vietQrPlan.accountsToAdd}\n'
+            'Logo VietQR sẽ khôi phục: ${vietQrPlan.logoSlotsToAdd.length}\n'
             'Không thay thế: ${preview.changedTripPayloads} hóa đơn '
             'trùng mã nhưng khác dữ liệu; '
             '${preview.deviceOnlyTrips} chuyến chỉ có trên máy.\n'
@@ -2250,13 +2265,21 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         beforeSettings: baseline.settings,
         archiveSettings: archive.settings,
         afterSettings: await SettingsBackupBundle.capture(store),
+        archivedLogos: archive.logos,
       );
       await BackupImportJournal.transition(
         support: support,
         expected: importJournal,
         phase: BackupImportPhase.completed);
       importJournal = null;
+      final updatedBankBookRaw = await store.getString(
+        'ttx_vietqr_bank_book_v1');
       if (!mounted) return;
+      if (updatedBankBookRaw != null) {
+        // Refresh the in-memory payment source immediately; the QR is
+        // generated from BankBook, not stored as an image in the archive.
+        setState(() => _bankBook = BankBook.decode(updatedBankBookRaw));
+      }
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -2271,14 +2294,19 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             'Nhóm cấu hình đã đối soát: ${postflight.verifiedNewSettings}\n'
             'Nhóm cấu hình có sẵn (không ghi đè): '
               '${settings.skippedExistingKeys}\n'
+            'Tài khoản VietQR mới: ${settings.addedBankAccounts}\n'
+            'Danh bạ VietQR đã bổ sung: ${settings.updatedBankBook ? "Có" : "Không"}\n'
             'Logo VietQR đã lưu: ${settings.restoredLogos}\n'
+            'Tài khoản VietQR đã đối soát: ${postflight.verifiedVietQrAccounts}\n'
+            'Logo VietQR đã đối soát: ${postflight.verifiedVietQrLogos}\n'
             'Chuyến chưa hoàn tất từ bản sao: '
               '${receipts.unfinishedBackupSkipped ? "Bỏ qua" : "Không có"}\n\n'
             'Bản sao an toàn trước nhập được giữ trong thư mục '
             'riêng của ứng dụng. Hãy dùng mục Xuất bản dự phòng '
             'trước khi nhập trong Cài đặt để lưu tệp ra ngoài. '
             'Đã đối soát lại dữ liệu gốc và dữ liệu vừa nhập. '
-            'Đóng và mở lại ứng dụng để áp dụng cấu hình mới.')),
+            'VietQR đã được tải lại ngay, có thể mở mục Mã QR thanh toán. '
+            'Hãy mở lại ứng dụng nếu muốn tải lại các thiết lập khác.')),
           actions: [
             FilledButton(
               onPressed: () => Navigator.pop(ctx),
