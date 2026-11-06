@@ -75,11 +75,14 @@ void main() {
       expect(find.byKey(const Key('bank-inline-results')), findsNothing);
       expect(find.byType(BottomSheet), findsNothing);
       await tester.enterText(
-        find.widgetWithText(TextField, 'Số tài khoản / Alias'),
+        find.widgetWithText(TextField, 'Số tài khoản'),
         '1234567890');
       await tester.enterText(
-        find.widgetWithText(TextField, 'Tên chủ tài khoản'),
-        'OWNER NAME');
+        find.byKey(const Key('bank-account-owner-field')),
+        'nguyễn văn a');
+      expect((tester.widget<TextField>(
+        find.byKey(const Key('bank-account-owner-field')))
+        .controller!.text, 'NGUYỄN VĂN A');
       await tester.ensureVisible(find.text('Lưu'));
       await tester.tap(find.text('Lưu'));
       await tester.pumpAndSettle();
@@ -87,6 +90,8 @@ void main() {
       await tester.tap(find.text('LƯU TÀI KHOẢN & LOGO'));
       await tester.pumpAndSettle();
       expect(saved?.selected?.account.bankBin, '970407');
+      expect(saved?.selected?.account.accountName, 'NGUYỄN VĂN A');
+      expect(find.text('Số tài khoản / Alias'), findsNothing);
       expect(tester.takeException(), isNull);
     }
   });
