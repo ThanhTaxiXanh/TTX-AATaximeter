@@ -72,6 +72,8 @@ void main() {
         'source-layer': 'transportation_name'},
       {'id': 'highway_minor', 'type': 'line',
         'source-layer': 'transportation'},
+      {'id': 'ttx-3d-readable-road-names', 'type': 'symbol',
+        'source-layer': 'transportation_name'},
       {'id': 'highway_major_inner', 'type': 'line',
         'source-layer': 'transportation'},
       {'id': 'railway', 'type': 'line',
@@ -108,6 +110,8 @@ void main() {
     expect(surfaces['building'], '#344461');
     expect(surfaces.containsKey('background'), false);
     expect(surfaces.containsKey('poi_label'), false);
+    expect(roadNameSymbolLayerIds(style),
+      isNot(contains('ttx-3d-readable-road-names')));
     expect(darkRoadLayerColors(style)['highway_minor'], '#7E99B9');
   });
 
