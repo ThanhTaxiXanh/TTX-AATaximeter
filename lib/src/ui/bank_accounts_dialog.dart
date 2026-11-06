@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../payment/bank_book.dart';
 import '../payment/bank_catalog.dart';
 import '../payment/brand_logo_storage.dart';
@@ -174,7 +175,7 @@ class _BankAccountEditorState extends State<BankAccountEditor> {
   late final TextEditingController _number = TextEditingController(
     text: widget.initial?.account.accountNumber ?? '');
   late final TextEditingController _owner = TextEditingController(
-    text: widget.initial?.account.accountName ?? '');
+    text: (widget.initial?.account.accountName ?? '').toUpperCase());
   VietQrBank? _bank;
   String? _error;
   final TextEditingController _search = TextEditingController();
@@ -215,7 +216,7 @@ class _BankAccountEditorState extends State<BankAccountEditor> {
     final account = VietQrAccount(
       bankBin: bank.bin,
       accountNumber: _number.text.trim().replaceAll(' ', ''),
-      accountName: _owner.text.trim(),
+      accountName: _owner.text.trim().toUpperCase(),
     );
     if (!account.isValid) {
       setState(() => _error =
@@ -289,11 +290,23 @@ class _BankAccountEditorState extends State<BankAccountEditor> {
         TextField(
           controller: _number, maxLength: 19,
           decoration: const InputDecoration(
-            labelText: 'Số tài khoản / Alias')),
+            labelText: 'Số tài khoản')),
         TextField(
+          key: const Key('bank-account-owner-field'),
           controller: _owner, maxLength: 100,
+          textCapitalization: TextCapitalization.characters,
+          inputFormatters: [
+            TextInputFormatter.withFunction((oldValue, newValue) {
+              // Avoid corrupting partially composed Vietnamese IME text.
+              if (newValue.composing.isValid &&
+                  !newValue.composing.isCollapsed) return newValue;
+              return newValue.copyWith(
+                text: newValue.text.toUpperCase());
+            }),
+          ],
           decoration: const InputDecoration(
-            labelText: 'Tên chủ tài khoản')),
+            labelText: 'TÊN CHỦ TÀI KHOẢN',
+            hintText: 'NGUYỄN VĂN A')),
         if (_error != null)
           Text(_error!, style: const TextStyle(color: Colors.redAccent)),
         const Text('Dữ liệu được lưu trên máy. Ứng dụng chưa xác minh '
