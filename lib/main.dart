@@ -477,10 +477,12 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       final settings = defaultTargetPlatform == TargetPlatform.android
           ? AndroidSettings(
               accuracy: LocationAccuracy.high,
-              intervalDuration: const Duration(seconds: 2),
-              distanceFilter: 2)
+              // Foreground-only preview refreshes the 3D map at 1 Hz.
+              // This stream never contributes to meter distance.
+              intervalDuration: const Duration(seconds: 1),
+              distanceFilter: 1)
           : const LocationSettings(
-              accuracy: LocationAccuracy.high, distanceFilter: 2);
+              accuracy: LocationAccuracy.high, distanceFilter: 1);
       _previewGps = Geolocator.getPositionStream(
         locationSettings: settings).listen(
           (p) {
@@ -524,7 +526,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     final age = DateTime.now().difference(p.timestamp);
     if (age.isNegative && age.abs() > const Duration(seconds: 5)) return;
     if (age > (cached
-        ? const Duration(minutes: 3)
+        ? const Duration(seconds: 45)
         : const Duration(seconds: 20))) return;
     setState(() {
       _mapLat = p.latitude;
@@ -728,7 +730,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           ? AndroidSettings(
               accuracy: LocationAccuracy.bestForNavigation,
               distanceFilter: 1,
-              intervalDuration: const Duration(seconds: 2),
+              // Request denser fixes; existing trusted-GPS safeguards
+              // still decide whether any point can affect the fare.
+              intervalDuration: const Duration(seconds: 1),
               foregroundNotificationConfig: const ForegroundNotificationConfig(
                 notificationTitle: 'TTX AATaximeter • Đang tính cước',
                 notificationText:
