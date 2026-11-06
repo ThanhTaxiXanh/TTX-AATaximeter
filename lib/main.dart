@@ -45,6 +45,7 @@ import 'src/ui/dashboard_map.dart';
 import 'src/ui/led_marquee_title.dart';
 import 'src/ui/driver_pro_design.dart';
 import 'src/ui/dashboard_preferences_dialog.dart';
+import 'src/ui/driver_pro_settings_screen.dart';
 import 'src/domain/dashboard_preferences.dart';
 import 'src/platform/car_state_bridge.dart';
 import 'src/domain/vehicle_registration.dart';
@@ -2469,66 +2470,38 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     }
   }
 
+  /// Save Map/3D settings from the new dedicated settings route.
+  /// This never touches GPS metering, tariffs or recorded trip data.
+  void _applyMapPreferences(DashboardPreferences next) {
+    if (!mounted || _importBackupBusy) return;
+    setState(() {
+      _dashboardPrefs = next;
+      _enableSaved3DAfterFirstMapFrame = false;
+      if (meter.status == MeterStatus.idle) _is3D = next.default3D;
+    });
+    unawaited(_persistDashboardSettings(next));
+  }
+
   Future<void> _settingsMenu() async {
-    if (_importBackupBusy) return;
-    final item = await showModalBottomSheet<String>(
-      context: context, showDragHandle: true,
-      builder: (context) => SafeArea(child: Wrap(children: [
-        ListTile(leading: const Icon(Icons.price_change_outlined),
-          title: const Text('Quản lý bảng giá cước'),
-          onTap: () => Navigator.pop(context, 'tariff')),
-        ListTile(leading: const Icon(Icons.map_outlined),
-          title: const Text('Bản đồ 2D / 3D và lời chào'),
-          onTap: () => Navigator.pop(context, 'dashboard')),
-        ListTile(leading: const Icon(Icons.directions_car_outlined),
-          title: const Text('Hãng xe và biển số'),
-          onTap: () => Navigator.pop(context, 'vehicle')),
-        ListTile(leading: const Icon(Icons.backup_outlined),
-          title: const Text('Sao lưu lịch sử chuyến (SQLite)'),
-          subtitle: const Text('Xuất bản sao an toàn, không ghi đè dữ liệu'),
-          onTap: () => Navigator.pop(context, 'backup')),
-        ListTile(leading: const Icon(Icons.inventory_2_outlined),
-          title: const Text('Sao lưu gộp SQLite + cấu hình'),
-          subtitle: const Text('Một tệp .ttxbackup có kiểm tra SHA-256'),
-          onTap: () => Navigator.pop(context, 'backupCombined')),
-        ListTile(leading: const Icon(Icons.restore_page_outlined),
-          title: const Text('Nhập bản sao lưu (.ttxbackup)'),
-          subtitle: const Text('Bổ sung dữ liệu, không ghi đè chuyến cũ'),
-          onTap: () => Navigator.pop(context, 'importCombined')),
-        ListTile(leading: const Icon(Icons.shield_outlined),
-          title: const Text('Xuất bản dự phòng trước khi nhập'),
-          subtitle: const Text('Kiểm tra và lưu bản gốc ra ngoài ứng dụng'),
-          onTap: () => Navigator.pop(context, 'exportSafety')),
-        ListTile(leading: const Icon(Icons.settings_backup_restore_outlined),
-          title: const Text('Sao lưu cấu hình (JSON)'),
-          subtitle: const Text('Bảng giá, xe, VietQR và bản đồ'),
-          onTap: () => Navigator.pop(context, 'backupSettings')),
-      ])),
-    );
-    if (!mounted) return;
-    switch (item) {
-      case 'tariff':
-        await _tariffDialog();
-      case 'dashboard':
-        await _editDashboardPreferences();
-      case 'vehicle':
-        await _configureVehicle();
-      case 'backup':
-        await _backupHistory();
-      case 'backupSettings':
-        await _backupSettings();
-      case 'backupCombined':
-        await _backupCombined();
-      case 'importCombined':
-        await _importCombinedBackup();
-      case 'exportSafety':
-        await _exportPreImportSafetyCopy();
-    }
+    if (!mounted || _importBackupBusy) return;
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => DriverProSettingsScreen(
+        initial: _dashboardPrefs,
+        onPreferencesChanged: _applyMapPreferences,
+        onAction: (key) {
+          if (key == 'car') Navigator.of(context).pop();
+          _showTools(key);
+        },
+      ),
+    ));
   }
 
   void _showTools(String choice) {
     if (_importBackupBusy) return;
     switch (choice) {
+      case 'tariff':
+        _tariffDialog();
+        return;
       case 'vehicle':
         _configureVehicle();
         return;
@@ -2593,58 +2566,17 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       backgroundColor: DriverProColors.background,
       appBar: AppBar(
         toolbarHeight: 56,
+        automaticallyImplyLeading: false,
         backgroundColor: DriverProColors.backgroundDeep,
-        leading: IconButton(
-          icon: const Icon(Icons.menu_rounded, size: 24),
-          tooltip: 'Menu cài đặt và bảng giá',
-          onPressed: _settingsMenu,
-        ),
-        titleSpacing: 2,
         centerTitle: true,
         title: const DriverProBrand(),
         actions: [
           IconButton(
-            icon: const Icon(Icons.settings_outlined, size: 23),
-            tooltip: 'Cài đặt ứng dụng',
+            icon: const Icon(Icons.settings_outlined, size: 25),
+            tooltip: 'Mở trung tâm cài đặt',
             onPressed: _settingsMenu,
           ),
-          PopupMenuButton<String>(
-            tooltip: 'Tiện ích và cấu hình',
-            onSelected: _showTools,
-            itemBuilder: (ctx) => const [
-              PopupMenuItem(value: 'vehicle',
-                child: Text('Cài đặt xe và biển số')),
-              PopupMenuItem(value: 'bank',
-                child: Text('Tài khoản ngân hàng VietQR')),
-              PopupMenuItem(value: 'backup',
-                child: Text('Sao lưu lịch sử (SQLite)')),
-              PopupMenuItem(value: 'backupSettings',
-                child: Text('Sao lưu cấu hình (JSON)')),
-              PopupMenuItem(value: 'backupCombined',
-                child: Text('Sao lưu gộp dữ liệu (.ttxbackup)')),
-              PopupMenuItem(value: 'importCombined',
-                child: Text('Nhập bản sao lưu (.ttxbackup)')),
-              PopupMenuItem(value: 'exportSafety',
-                child: Text('Xuất bản dự phòng trước khi nhập')),
-              PopupMenuItem(value: 'inspectCombined',
-                child: Text('Kiểm tra gói dữ liệu (.ttxbackup)')),
-              PopupMenuItem(value: 'inspectSettings',
-                child: Text('Kiểm tra tệp sao lưu cấu hình')),
-              PopupMenuItem(value: 'quote',
-                child: Text('Báo giá chuyến đi')),
-              PopupMenuItem(value: 'qr',
-                child: Text('Mã QR thanh toán')),
-              PopupMenuItem(value: 'car',
-                child: Text('Chế độ Car Mode / HUD trên điện thoại')),
-              PopupMenuItem(value: 'toll',
-                child: Text('Nhập phí BOT')),
-              PopupMenuItem(value: 'locationPermission',
-                child: Text('Quyền định vị “Luôn cho phép”')),
-              PopupMenuItem(value: 'dashboardSettings',
-                child: Text('Bản đồ 2D / 3D và lời chào')),
-            ],
-            icon: const Icon(Icons.more_vert_rounded, size: 21),
-          ),
+          const SizedBox(width: 6),
         ],
       ),
       body: SafeArea(child: ListView(
@@ -2724,6 +2656,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                 pitchDegrees: _dashboardPrefs.renderedPitch,
                 is3D: _is3D,
                 dark: _dashboardPrefs.darkMap,
+                showCurrentRoadName: _dashboardPrefs.showCurrentRoadName,
                 onToggle3D: _toggleMap3D,
                 onToggleDark: _toggleMapDark,
                 onLocate: _locateOnMap,
