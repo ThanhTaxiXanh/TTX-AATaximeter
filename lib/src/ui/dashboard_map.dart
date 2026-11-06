@@ -429,30 +429,36 @@ class _DashboardMapState extends State<DashboardMap> {
           ]),
         ),
         if (widget.showCurrentRoadName)
-          Positioned(left: 111, right: 8, bottom: 14,
-            child: IgnorePointer(child: Container(
-              constraints: const BoxConstraints(minHeight: 42),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xF0091929),
-                border: Border.all(color: DriverProColors.green, width: 1.6),
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: const [BoxShadow(
-                  color: Color(0x65000000), blurRadius: 10)],
+          Positioned(right: 8, bottom: 27,
+            child: IgnorePointer(child: ConstrainedBox(
+              // A short road like "QL1A" only uses its text width; longer
+              // names grow until the safe map-area width is reached.
+              constraints: BoxConstraints(maxWidth:
+                  (MediaQuery.sizeOf(context).width * 0.66)
+                      .clamp(145.0, 375.0)),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11, vertical: 9),
+                decoration: BoxDecoration(
+                  color: const Color(0xF0091929),
+                  border: Border.all(color: DriverProColors.green, width: 1.4),
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: const [BoxShadow(
+                    color: Color(0x65000000), blurRadius: 10)],
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.signpost_outlined,
+                    color: DriverProColors.green, size: 18),
+                  const SizedBox(width: 8),
+                  Flexible(child: Text(_currentRoadName ??
+                      (_hasFix ? 'Đang xác định tên đường...'
+                          : 'Đang chờ vị trí GPS'),
+                    maxLines: 2, overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: _currentRoadName == null
+                        ? DriverProColors.muted : Colors.white,
+                      fontWeight: FontWeight.w800, fontSize: 12.5))),
+                ]),
               ),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.signpost_outlined,
-                  color: DriverProColors.green, size: 18),
-                const SizedBox(width: 8),
-                Expanded(child: Text(_currentRoadName ??
-                    (_hasFix ? 'Đang xác định tên đường...'
-                        : 'Đang chờ vị trí GPS'),
-                  maxLines: 2, overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: _currentRoadName == null
-                      ? DriverProColors.muted : Colors.white,
-                    fontWeight: FontWeight.w800, fontSize: 12.5))),
-              ]),
             )),
           ),
         Positioned(left: 8, bottom: 8, child: _speedPanel()),
