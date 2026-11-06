@@ -29,6 +29,7 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
   sqflite_common_ffi: ^2.4.5
+  shared_preferences_platform_interface: ^2.4.2
   # Verify native SQLite from the current signed release rather than the
   # older 3.5.2 Android binary whose download failed SHA-256 validation.
   sqlite3: 3.8.0
