@@ -11,6 +11,7 @@ import 'package:geolocator_android/geolocator_android.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
 
 import 'src/core/taximeter_engine.dart';
 import 'src/core/location_tracking_policy.dart';
@@ -2090,7 +2091,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             'Logo sẽ nhập nếu danh bạ VietQR còn trống.\n\n'
             'Trước khi nhập, ứng dụng tạo một bản sao an toàn của '
             'dữ liệu đang có trong thư mục riêng của ứng dụng. '
-            'Bản sao này KHÔNG được khôi phục tự động khi có lỗi. '
+            'Bạn có thể xuất bản sao này ra ngoài sau khi nhập '
+            'qua mục Xuất bản dự phòng trước khi nhập. '
+            'Bản sao KHÔNG được khôi phục tự động khi có lỗi. '
             'Không thể hoàn tác toàn bộ thao tác bằng một nút. '
             'Việc nhập lại cùng tệp có thể tiếp tục các mục còn thiếu. '
             'Bạn cần mở lại ứng dụng để áp dụng cấu hình mới.')),
@@ -2120,6 +2123,11 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       final safetyDir = Directory(
         '${support.path}/ttx_pre_import_safety');
       await safetyDir.create(recursive: true);
+      if (!path.isWithin(
+          await support.resolveSymbolicLinks(),
+          await safetyDir.resolveSymbolicLinks())) {
+        throw const FormatException('Thư mục dự phòng không an toàn');
+      }
       final currentSettings = await SettingsBackupBundle.capture(store);
       final existingBook = currentSettings
           .settings['ttx_vietqr_bank_book_v1'];
@@ -2140,12 +2148,22 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       final checkpoint = File(
         '${safetyDir.path}/truoc_nhap_'
         '${DateTime.now().toUtc().microsecondsSinceEpoch}.ttxbackup');
-      await checkpoint.writeAsBytes(recovery.encode(), flush: true);
-      // Check what actually reached storage before modifying any live data.
-      final confirmedCopy = UnifiedBackupBundle.decode(
-        await checkpoint.readAsBytes());
-      if (confirmedCopy.sqliteBytes.isEmpty) {
-        throw const FormatException('Bản sao trước nhập không hợp lệ');
+      // A process crash cannot expose a half-written .ttxbackup as a valid
+      // vault entry: only publish it after checksums pass.
+      final pendingCopy = File('${checkpoint.path}.tmp');
+      try {
+        if (await checkpoint.exists() || await pendingCopy.exists()) {
+          throw StateError('Tên bản dự phòng đã tồn tại; không ghi đè');
+        }
+        await pendingCopy.writeAsBytes(recovery.encode(), flush: true);
+        final confirmedCopy = UnifiedBackupBundle.decode(
+          await pendingCopy.readAsBytes());
+        if (confirmedCopy.sqliteBytes.isEmpty) {
+          throw const FormatException('Bản sao trước nhập không hợp lệ');
+        }
+        await pendingCopy.rename(checkpoint.path);
+      } finally {
+        if (await pendingCopy.exists()) await pendingCopy.delete();
       }
 
       changesMayHaveStarted = true;
@@ -2172,8 +2190,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             'Chuyến chưa hoàn tất từ bản sao: '
               '${receipts.unfinishedBackupSkipped ? "Bỏ qua" : "Không có"}\n\n'
             'Bản sao an toàn trước nhập được giữ trong thư mục '
-            'riêng của ứng dụng. Hãy đóng và mở lại ứng dụng để '
-            'áp dụng các cấu hình mới.')),
+            'riêng của ứng dụng. Hãy dùng mục Xuất bản dự phòng '
+            'trước khi nhập trong Cài đặt để lưu tệp ra ngoài. '
+            'Đóng và mở lại ứng dụng để áp dụng cấu hình mới.')),
           actions: [
             FilledButton(
               onPressed: () => Navigator.pop(ctx),
