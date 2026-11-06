@@ -8,17 +8,20 @@ void main() {
     expect(p.auto3DOnStart, true);
     expect(p.darkMap, false);
     expect(p.showCurrentRoadName, true);
+    expect(p.carHudMirror, false);
     expect(p.renderedPitch, 60);
   });
   test('custom messages and presentation persist', () {
     final p = const DashboardPreferences().copyWith(
       welcome: 'Xin chào', thanks: 'Xin cảm ơn',
       darkMap: true, default3D: true, auto3DOnStart: false,
-      pitchDegrees: 75, showCurrentRoadName: false);
+      pitchDegrees: 75, showCurrentRoadName: false,
+      carHudMirror: true);
     final restored = DashboardPreferences.decode(p.encode());
     expect(restored.welcome, 'Xin chào');
     expect(restored.thanks, 'Xin cảm ơn');
     expect(restored.darkMap, true);
+    expect(restored.carHudMirror, true);
     expect(restored.showCurrentRoadName, false);
     expect(restored.default3D, true);
     expect(restored.auto3DOnStart, false);
@@ -32,6 +35,7 @@ void main() {
     expect(p.welcome, isNotEmpty);
     // Older saved settings have no road-name key: it must default to on.
     expect(p.showCurrentRoadName, true);
+    expect(p.carHudMirror, false);
     expect(() => DashboardPreferences.decode('{"schema":3}'),
       throwsFormatException);
   });
