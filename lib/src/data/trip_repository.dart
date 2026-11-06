@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as path;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
@@ -367,92 +368,119 @@ class TripRepository {
     }
   }
 
-  /// Preflight of an *external* backup. Opens SQLite read-only, verifies
-  /// schema/receipt payloads/active journal, then closes it. Never imports
-  /// or replaces the running app's database.
+  /// Preflight of an *external* SQLite backup. No writes are performed.
   static Future<TripBackupInspection> inspectBackupFile(File file) async {
     if (!await file.exists() || await file.length() == 0) {
       throw const FormatException('Tệp SQLite sao lưu trống hoặc không tồn tại');
     }
-    final backup = await openDatabase(
+    final database = await openDatabase(
       file.path, readOnly: true, singleInstance: false);
     try {
-      final integrity = await backup.rawQuery('PRAGMA integrity_check');
-      if (integrity.length != 1 ||
-          integrity.single['integrity_check'] != 'ok') {
-        throw const FormatException('SQLite integrity_check không đạt');
+      return _inspectData(database);
+    } finally {
+      await database.close();
+    }
+  }
+
+  /// A consistent, read-only inventory of the currently installed data.
+  /// For comparisons only: never changes or replaces existing trips.
+  Future<TripBackupInspection> inspectCurrentData() async {
+    final database = await _db;
+    return database.transaction((txn) => _inspectData(txn));
+  }
+
+  static Future<TripBackupInspection> _inspectData(
+      DatabaseExecutor reader) async {
+    final integrity = await reader.rawQuery('PRAGMA integrity_check');
+    if (integrity.length != 1 ||
+        integrity.single['integrity_check'] != 'ok') {
+      throw const FormatException('SQLite integrity_check không đạt');
+    }
+    final version = await reader.rawQuery('PRAGMA user_version');
+    if (version.isEmpty || version.first['user_version'] != 3) {
+      throw const FormatException('Chỉ hỗ trợ kiểm tra SQLite schema v3');
+    }
+    final tables = await reader.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' "
+      "AND name IN ('trips','active_trip','active_trip_route')");
+    if (tables.length != 3) {
+      throw const FormatException('Thiếu bảng dữ liệu TTX');
+    }
+
+    final completed = await reader.query('trips',
+      columns: ['id', 'payload']);
+    final digests = <String, String>{};
+    for (final row in completed) {
+      final id = row['id'];
+      final payload = row['payload'];
+      if (id is! String || id.isEmpty || payload is! String) {
+        throw const FormatException('Hóa đơn SQLite thiếu mã hoặc nội dung');
       }
-      final version = await backup.rawQuery('PRAGMA user_version');
-      if (version.isEmpty || version.first['user_version'] != 3) {
-        throw const FormatException('Chỉ hỗ trợ kiểm tra SQLite schema v3');
+      final decoded = TripRecord.decode(payload);
+      if (decoded.id != id || digests.containsKey(id)) {
+        throw const FormatException('Mã hóa đơn SQLite không khớp');
       }
-      final tables = await backup.rawQuery(
-        "SELECT name FROM sqlite_master WHERE type = 'table' "
-        "AND name IN ('trips','active_trip','active_trip_route')");
-      if (tables.length != 3) {
-        throw const FormatException('Thiếu bảng dữ liệu TTX');
+      digests[id] = sha256.convert(utf8.encode(payload)).toString();
+    }
+
+    final activeRows = await reader.query('active_trip',
+      columns: ['payload']);
+    if (activeRows.length > 1) {
+      throw const FormatException('Có nhiều checkpoint đang hoạt động');
+    }
+    final route = await reader.query('active_trip_route',
+      orderBy: 'sequence ASC');
+    for (var index = 0; index < route.length; index++) {
+      if (route[index]['sequence'] != index) {
+        throw const FormatException('Dữ liệu GPS SQLite bị thiếu thứ tự');
       }
-      final completed = await backup.query('trips', columns: ['payload']);
-      for (final row in completed) {
-        final payload = row['payload'];
-        if (payload is! String) {
-          throw const FormatException('Hóa đơn SQLite thiếu nội dung');
-        }
-        TripRecord.decode(payload); // Validate all receipts, not only count.
-      }
-      final activeRows = await backup.query('active_trip',
-        columns: ['payload']);
-      if (activeRows.length > 1) {
-        throw const FormatException('Có nhiều checkpoint đang hoạt động');
-      }
-      final routeRows = await backup.rawQuery(
-        'SELECT COUNT(*) AS count, MIN(sequence) AS first, '
-        'MAX(sequence) AS last FROM active_trip_route');
-      final routeInfo = routeRows.single;
-      final routeCount = routeInfo['count'] as int;
-      if (activeRows.isEmpty) {
-        if (routeCount != 0) {
-          throw const FormatException('GPS không có chuyến đang hoạt động');
-        }
-        return TripBackupInspection(
-          completedTripCount: completed.length,
-          hasActiveTrip: false, activeRouteCount: 0);
-      }
-      final payload = activeRows.single['payload'];
-      if (payload is! String) {
-        throw const FormatException('Checkpoint thiếu dữ liệu');
-      }
-      final snapshot = TripSessionSnapshot.decode(payload);
-      final header = jsonDecode(payload);
-      if (header is! Map) {
-        throw const FormatException('Checkpoint không hợp lệ');
-      }
-      if (header['routeStorage'] == 'sqlite-v3') {
-        final expected = header['routeCount'];
-        if (expected is! int || expected < 0 ||
-            expected != routeCount ||
-            (routeCount > 0 &&
-              (routeInfo['first'] != 0 || routeInfo['last'] != routeCount - 1))) {
-          throw const FormatException('Số điểm GPS checkpoint không khớp');
-        }
-      } else if (header['routeStorage'] == null) {
-        if (routeCount != 0) {
-          throw const FormatException('Checkpoint cũ có GPS journal bất thường');
-        }
-        // Legacy payload keeps the route inside JSON.
-        return TripBackupInspection(
-          completedTripCount: completed.length,
-          hasActiveTrip: true,
-          activeRouteCount: snapshot.routePoints.length);
-      } else {
-        throw const FormatException('Kiểu lưu GPS không được hỗ trợ');
+      // Reject malformed coordinates, timestamps and accuracy even if the
+      // SQLite file and manifest hashes are otherwise structurally valid.
+      _decodeRouteRow(route[index]);
+    }
+    if (activeRows.isEmpty) {
+      if (route.isNotEmpty) {
+        throw const FormatException('GPS không có chuyến đang hoạt động');
       }
       return TripBackupInspection(
-        completedTripCount: completed.length,
-        hasActiveTrip: true, activeRouteCount: routeCount);
-    } finally {
-      await backup.close();
+        completedTripCount: digests.length,
+        completedTripDigests: Map<String, String>.unmodifiable(digests),
+        hasActiveTrip: false, activeRouteCount: 0);
     }
+    final payload = activeRows.single['payload'];
+    if (payload is! String) {
+      throw const FormatException('Checkpoint thiếu dữ liệu');
+    }
+    final snapshot = TripSessionSnapshot.decode(payload);
+    final header = jsonDecode(payload);
+    if (header is! Map) {
+      throw const FormatException('Checkpoint không hợp lệ');
+    }
+    final startedAt = snapshot.meter['startedAt']?.toString();
+    if (header['routeStorage'] == 'sqlite-v3') {
+      final expected = header['routeCount'];
+      if (expected is! int || expected < 0 || expected != route.length) {
+        throw const FormatException('Số điểm GPS checkpoint không khớp');
+      }
+    } else if (header['routeStorage'] == null) {
+      if (route.isNotEmpty) {
+        throw const FormatException('Checkpoint cũ có GPS journal bất thường');
+      }
+      return TripBackupInspection(
+        completedTripCount: digests.length,
+        completedTripDigests: Map<String, String>.unmodifiable(digests),
+        hasActiveTrip: true,
+        activeRouteCount: snapshot.routePoints.length,
+        activeTripStartedAt: startedAt);
+    } else {
+      throw const FormatException('Kiểu lưu GPS không được hỗ trợ');
+    }
+    return TripBackupInspection(
+      completedTripCount: digests.length,
+      completedTripDigests: Map<String, String>.unmodifiable(digests),
+      hasActiveTrip: true,
+      activeRouteCount: route.length,
+      activeTripStartedAt: startedAt);
   }
 
   Future<void> dispose() async {
@@ -463,14 +491,20 @@ class TripRepository {
 }
 
 /// Verified read-only metadata. No restored data is applied to the app.
+/// Receipt SHA-256 digests are internal comparison inputs; never display
+/// raw trip IDs or customer information in the preflight UI.
 class TripBackupInspection {
   const TripBackupInspection({
     required this.completedTripCount,
     required this.hasActiveTrip,
     required this.activeRouteCount,
+    this.completedTripDigests = const {},
+    this.activeTripStartedAt,
   });
 
   final int completedTripCount;
   final bool hasActiveTrip;
   final int activeRouteCount;
+  final Map<String, String> completedTripDigests;
+  final String? activeTripStartedAt;
 }
