@@ -484,6 +484,70 @@ class TripRepository {
       activeTripStartedAt: startedAt);
   }
 
+  /// Import ONLY missing completed receipts from a previously verified v3
+  /// SQLite archive. Existing IDs (even with different payloads) are NEVER
+  /// updated. The entire insert set is atomic and retrying is idempotent.
+  /// An unfinished session is NEVER imported or replaced.
+  Future<CompletedTripImportResult> importMissingCompletedTrips(
+      File externalBackup) async {
+    // Full read-only preflight precedes any write to the live database.
+    await inspectBackupFile(externalBackup);
+    final external = await openDatabase(
+      externalBackup.path, readOnly: true, singleInstance: false);
+    try {
+      final rows = await external.query('trips',
+        columns: ['id', 'payload']);
+      final candidates = <TripRecord>[];
+      for (final row in rows) {
+        final id = row['id'];
+        final payload = row['payload'];
+        if (id is! String || payload is! String) {
+          throw const FormatException('Hóa đơn sao lưu không hợp lệ');
+        }
+        final decoded = TripRecord.decode(payload);
+        if (decoded.id != id) {
+          throw const FormatException('Mã hóa đơn sao lưu không khớp');
+        }
+        candidates.add(decoded);
+      }
+      final live = await _db;
+      return await live.transaction((txn) async {
+        final active = await txn.query('active_trip',
+          columns: ['id'], limit: 1);
+        if (active.isNotEmpty) {
+          throw StateError('Máy đang có chuyến chưa hoàn tất; không nhập');
+        }
+        var imported = 0;
+        var identical = 0;
+        var conflicts = 0;
+        for (final trip in candidates) {
+          final existing = await txn.query('trips',
+            columns: ['payload'],
+            where: 'id = ?', whereArgs: [trip.id], limit: 1);
+          if (existing.isNotEmpty) {
+            final current = existing.single['payload'];
+            if (current == trip.encode()) {
+              identical++;
+            } else {
+              conflicts++;
+            }
+            continue;
+          }
+          await txn.insert('trips', _row(trip),
+            conflictAlgorithm: ConflictAlgorithm.abort);
+          imported++;
+        }
+        return CompletedTripImportResult(
+          imported: imported, identical: identical,
+          conflictsSkipped: conflicts,
+          unfinishedBackupSkipped: (await external.query(
+            'active_trip', columns: ['id'], limit: 1)).isNotEmpty);
+      });
+    } finally {
+      await external.close();
+    }
+  }
+
   Future<void> dispose() async {
     final db = _database;
     _database = null;
@@ -508,4 +572,20 @@ class TripBackupInspection {
   final int activeRouteCount;
   final Map<String, String> completedTripDigests;
   final String? activeTripStartedAt;
+}
+
+/// Returned only after the atomic SQLite insert transaction has committed.
+/// Existing records are never deleted, replaced or re-priced.
+class CompletedTripImportResult {
+  const CompletedTripImportResult({
+    required this.imported,
+    required this.identical,
+    required this.conflictsSkipped,
+    required this.unfinishedBackupSkipped,
+  });
+
+  final int imported;
+  final int identical;
+  final int conflictsSkipped;
+  final bool unfinishedBackupSkipped;
 }
