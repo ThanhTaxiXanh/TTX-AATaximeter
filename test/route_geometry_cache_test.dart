@@ -46,6 +46,24 @@ void main() {
     expect(route.length, 2000);
   });
 
+  test('completed 64-fix windows are simplified exactly once', () {
+    final cache = RouteRenderGeometryCache();
+    final route = List.generate(1000, sample);
+    cache.render(route);
+    final first = cache.finalizedWindowCalculations;
+    expect(first, (999 ~/ 64));
+    // Each GPS fix only updates the open tail; no completed window is rebuilt.
+    for (var i = 1000; i < 1088; i++) {
+      route.add(sample(i));
+      cache.render(route);
+      expect(cache.finalizedWindowCalculations,
+          (route.length - 1) ~/ 64);
+    }
+    verifyEqualGeometry(cache.render(route), displayRouteSegments(route));
+    expect(cache.finalizedWindowCalculations,
+        (route.length - 1) ~/ 64);
+  });
+
   test('different segments, GPS gaps and nonconsecutive segment ids', () {
     final route = <TripRoutePoint>[];
     final cache = RouteRenderGeometryCache();
