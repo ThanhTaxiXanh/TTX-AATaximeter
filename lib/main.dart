@@ -42,6 +42,7 @@ import 'src/domain/tariff_catalog.dart';
 import 'src/ui/tariff_catalog_page.dart';
 import 'src/ui/tariff_settings_dialog.dart';
 import 'src/ui/dashboard_map.dart';
+import 'src/ui/map_presentation_gate.dart';
 import 'src/ui/led_marquee_title.dart';
 import 'src/ui/driver_pro_design.dart';
 import 'src/ui/dashboard_preferences_dialog.dart';
@@ -133,6 +134,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   bool _initializing = false;
   // Timer-only changes repaint the fare/KPI section, not the native map.
   final ValueNotifier<int> _meterPresentation = ValueNotifier<int>(0);
+  // GPS visual revisions never request a rebuild of the fare dashboard.
+  final ValueNotifier<int> _mapPresentation = ValueNotifier<int>(0);
+  final MapPresentationGate _mapFrameGate = MapPresentationGate();
   bool _exportingBackup = false;
   bool _settingsBackupBusy = false;
   bool _unifiedBackupBusy = false;
@@ -374,6 +378,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
     _meterPresentation.dispose();
+    _mapPresentation.dispose();
     _gps?.cancel();
     _previewGps?.cancel();
     repository.dispose();
@@ -550,6 +555,32 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     _mapLon = p.longitude;
   }
 
+  /// Flush only the map subtree after accepted GPS telemetry. The meter
+  /// ticks and saves every trusted fix regardless of visual throttling.
+  void _publishMapFrame({bool force = false}) {
+    if (!mounted || !_appVisible || _carPreview) return;
+    final tracking = meter.status == MeterStatus.running ||
+        meter.status == MeterStatus.paused;
+    if (_mapFrameGate.shouldPublish(
+      latitude: _mapLat,
+      longitude: _mapLon,
+      headingDegrees: _headingDegrees,
+      speedKmh: tracking ? meter.speedKmh : _previewSpeedKmh,
+      routePointCount: tracking ? _routePoints.length : 0,
+      force: force,
+    )) {
+      _mapPresentation.value++;
+    }
+    // Diagnostic counters appear only in debug, never in release billing.
+    assert(() {
+      if (_mapFrameGate.observed % 120 == 0) {
+        debugPrint('TTX_PERF map_frames_requested='
+          '${_mapFrameGate.observed} rendered=${_mapFrameGate.published}');
+      }
+      return true;
+    }());
+  }
+
   void _onPreviewFix(Position p, {bool cached = false}) {
     if (!mounted || !_appVisible || _gps != null ||
         (meter.status != MeterStatus.idle &&
@@ -563,19 +594,20 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     if (age > (cached
         ? const Duration(seconds: 45)
         : const Duration(seconds: 20))) return;
-    setState(() {
-      _updateMapGpsPosition(p);
-      _previewSpeedKmh = p.speed.isFinite && p.speed > 0
-          ? (p.speed * 3.6).clamp(0.0, 300.0).toDouble() : 0;
-      if (p.heading.isFinite && p.heading >= 0 &&
-          p.heading <= 360 && p.speed > 1.5) _headingDegrees = p.heading;
-      _gpsStatus = 'GPS xem bản đồ ±' +
-          p.accuracy.round().toString() + ' m';
-      if (_storageReady && _enableSaved3DAfterFirstMapFrame) {
-        _enableSaved3DAfterFirstMapFrame = false;
-        _is3D = true;
-      }
-    });
+    // Do not rebuild the entire dashboard for every idle map GPS fix.
+    _updateMapGpsPosition(p);
+    _previewSpeedKmh = p.speed.isFinite && p.speed > 0
+        ? (p.speed * 3.6).clamp(0.0, 300.0).toDouble() : 0;
+    if (p.heading.isFinite && p.heading >= 0 &&
+        p.heading <= 360 && p.speed > 1.5) _headingDegrees = p.heading;
+    _gpsStatus = 'GPS xem bản đồ ±' +
+        p.accuracy.round().toString() + ' m';
+    if (_storageReady && _enableSaved3DAfterFirstMapFrame) {
+      _enableSaved3DAfterFirstMapFrame = false;
+      setState(() => _is3D = true); // One-time mode change needs root layout.
+    } else {
+      _publishMapFrame();
+    }
   }
 
   Future<void> _stopPreviewGps() async {
@@ -845,18 +877,29 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             ));
           }
         }
-        _applyVisibleState(() {
-          _updateMapGpsPosition(position);
-          if (position.heading.isFinite && position.heading >= 0 &&
-              position.heading <= 360 && position.speed > 1.5) {
-            _headingDegrees = position.heading;
-          }
-          _gpsStatus = 'GPS nền ±' +
-              position.accuracy.toStringAsFixed(0) + ' m';
-        });
+        final wasSignalWarning =
+            _gpsStatus.startsWith('GPS yếu') ||
+            _gpsStatus.startsWith('GPS gián đoạn');
+        // All route, timer, speed and fare updates remain authoritative even
+        // when Android has paused the Flutter rendering tree.
+        _updateMapGpsPosition(position);
+        if (position.heading.isFinite && position.heading >= 0 &&
+            position.heading <= 360 && position.speed > 1.5) {
+          _headingDegrees = position.heading;
+        }
+        _gpsStatus = 'GPS nền ±' +
+            position.accuracy.toStringAsFixed(0) + ' m';
         // Also advance on each valid fix: Android may throttle Dart timers
         // during multitasking, but a healthy location stream may continue.
         _meterTick(now);
+        if (_appVisible && mounted) {
+          if (_carPreview) {
+            setState(() {}); // Full-screen HUD needs live speed and fare.
+          } else {
+            _publishMapFrame();
+            if (wasSignalWarning) _meterPresentation.value++;
+          }
+        }
       }, onError: (Object error) {
         _suspendForGps('Dịch vụ GPS lỗi: $error');
       }, onDone: () {
@@ -2695,7 +2738,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             child: Stack(children: [
               AbsorbPointer(
                 absorbing: !_storageReady,
-                child: DashboardMap(
+                child: ValueListenableBuilder<int>(
+                  valueListenable: _mapPresentation,
+                  builder: (context, revision, child) => DashboardMap(
                   height: mapHeight,
                   latitude: _mapLat, longitude: _mapLon,
                   routePoints: active ? _routePoints : const [],
@@ -2709,6 +2754,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                   onToggle3D: _toggleMap3D,
                   onToggleDark: _toggleMapDark,
                   onLocate: _locateOnMap,
+                  ),
                 ),
               ),
               if (!_storageReady)
