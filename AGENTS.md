@@ -14,6 +14,11 @@ screen captures:
 2. Keep all external basemap URLs in
    `lib/src/ui/vietnam_map_sovereignty.dart`.
 3. Preserve the Vietnam-facing labels on both raster 2D and vector 3D.
+   Do NOT rely on names alone: every unverified maritime basemap must also
+   be redacted using `maritimeRedactionZones` as an opaque no-border fill
+   in 2D, 3D and trip history. In MapLibre, fail closed with an opaque
+   safety panel if the redaction layer cannot be installed. Do not
+   alter the zones without reviewing actual map data and tests.
 4. Run `python3 tool/check_map_sovereignty.py` and
    `python3 -m unittest discover -s tool -p 'test_map_sovereignty_gate.py'`.
 5. Run `flutter test test/vietnam_map_sovereignty_test.dart`,
