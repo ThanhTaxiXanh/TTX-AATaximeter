@@ -42,6 +42,11 @@ class RouteRenderGeometryCache {
   final Map<int, _RouteSegmentCache> _segments = {};
   List<List<TripRoutePoint>>? _output;
 
+  /// Number of finalized 64-fix windows calculated since the last reset.
+  /// Intended for regression tests / profiling, not monetary accounting.
+  int get finalizedWindowCalculations => _segments.values.fold<int>(
+      0, (sum, segment) => sum + segment.completedCalculations);
+
   void reset() {
     _source = null;
     _processed = 0;
@@ -93,6 +98,7 @@ class _RouteSegmentCache {
   final List<TripRoutePoint> points = [];
   final List<List<TripRoutePoint>> _completedWindows = [];
   static const int _window = 64;
+  int completedCalculations = 0;
 
   List<TripRoutePoint> simplified(double toleranceMeters) {
     final last = points.length - 1;
@@ -102,6 +108,7 @@ class _RouteSegmentCache {
       final start = _completedWindows.length * _window;
       _completedWindows.add(_simplifyWindow(
           points, start, start + _window, toleranceMeters));
+      completedCalculations++;
     }
 
     final result = <TripRoutePoint>[];
