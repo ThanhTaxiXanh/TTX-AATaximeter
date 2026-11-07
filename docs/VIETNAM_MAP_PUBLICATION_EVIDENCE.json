@@ -1,0 +1,47 @@
+{
+  "policy": "TTX-VN-MAP-01",
+  "owner_requirement": "Maritime labels are Hoàng Sa (Việt Nam), Trường Sa (Việt Nam), Biển Đông; no unapproved foreign disputed captions or claimed borders",
+  "sources": [
+    "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    "https://tiles.openfreemap.org/styles/dark",
+    "https://tiles.openfreemap.org/styles/liberty"
+  ],
+  "categories_required": [
+    "raster_tiles",
+    "vector_style_and_tiles",
+    "search_results",
+    "screenshots_and_exports"
+  ],
+  "approved_for_external_publication": false,
+  "reviews": {
+    "raster_tiles": {
+      "passed": false,
+      "reviewer": null,
+      "date_utc": null,
+      "evidence_sha256": null,
+      "notes": "OSM raster pixels are opaque to Dart and remain unverified. Inspect map at strategic zooms over each archipelago and adjacent sea."
+    },
+    "vector_style_and_tiles": {
+      "passed": false,
+      "reviewer": null,
+      "date_utc": null,
+      "evidence_sha256": null,
+      "notes": "OpenFreeMap style JSON + live vector tiles/administrative boundaries must be visually reviewed. Source overlay alone cannot erase competing map geometry."
+    },
+    "search_results": {
+      "passed": false,
+      "reviewer": null,
+      "date_utc": null,
+      "evidence_sha256": null,
+      "notes": "No current search result UI is certified. Any future geocoder/search provider must use approvedLabel and pass real response fixtures."
+    },
+    "screenshots_and_exports": {
+      "passed": false,
+      "reviewer": null,
+      "date_utc": null,
+      "evidence_sha256": null,
+      "notes": "Screenshots, exports, shared images and previews must be reviewed in both styles and map scales before public distribution."
+    }
+  },
+  "disclaimer": "Metadata approval does not demonstrate actual third-party tile or pixel correctness. Preserve signed review evidence outside public user data."
+}

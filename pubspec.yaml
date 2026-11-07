@@ -1,0 +1,40 @@
+name: ttx_aataximeter
+description: TTX AATaximeter - clean-room Flutter/Dart taximeter MVP.
+publish_to: none
+version: 0.9.24+44
+
+environment:
+  sdk: '>=3.11.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  geolocator: ^14.1.2
+  geolocator_android: ^5.2.1
+  flutter_map: ^8.3.2
+  maplibre_gl: 0.27.1
+  latlong2: ^0.10.1
+  shared_preferences: ^2.5.6
+  sqflite: ^2.4.2+1
+  path: ^1.9.1
+  path_provider: ^2.1.5
+  qr_flutter: ^4.1.0
+  emv_qr_builder: ^1.0.2
+  flutter_svg: ^2.3.2
+  file_picker: ^13.3.2
+  crypto: ^3.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  sqflite_common_ffi: ^2.4.5
+  shared_preferences_platform_interface: ^2.4.2
+  # Verify native SQLite from the current signed release rather than the
+  # older 3.5.2 Android binary whose download failed SHA-256 validation.
+  sqlite3: 3.8.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/data/vietqr_banks.json

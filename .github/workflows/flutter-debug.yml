@@ -1,0 +1,89 @@
+name: Flutter MVP Debug APK
+on:
+  push:
+    branches: [main, feature/flutter-taximeter-foundation]
+  pull_request:
+  workflow_dispatch:
+
+# The same branch receives push and draft-PR events. Keep only the latest
+# source revision in flight instead of building obsolete APKs in parallel.
+concurrency:
+  group: flutter-mvp-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      # MapLibre GL 0.27.1 Android plugin compiles with Java 21.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Android project
+        run: flutter create . --platforms=android --project-name ttx_aataximeter --org vn.thanhtaxixanh
+      - name: Remove auto-generated demo widget test
+        run: rm -f test/widget_test.dart
+      - name: Inject GPS permissions
+        run: python3 tool/bootstrap_android.py
+      - name: Resolve dependencies
+        run: flutter pub get
+      # Required on EVERY source change; includes map, tiles, geocoder and
+      # screenshot plumbing. Public distribution separately requires
+      # `python3 tool/check_map_sovereignty.py --publish` with evidence.
+      - name: Vietnam map sovereignty source gate (mandatory)
+        run: |
+          python3 tool/check_map_sovereignty.py
+          python3 -m unittest discover -s tool -p 'test_map_sovereignty_gate.py'
+      - name: Run unit tests
+        run: flutter test
+      - name: Flutter static analysis
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - name: Build DEBUG APK (not Android Auto enabled)
+        run: flutter build apk --debug
+      - name: Verify APK merged GPS foreground-service manifest
+        run: python3 tool/verify_apk_manifest.py
+      - name: Report original universal debug APK size
+        run: |
+          python3 tool/apk_size_report.py build/app/outputs/flutter-apk/app-debug.apk --output build/debug-size.txt
+          cat build/debug-size.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ttx-aataximeter-mvp-debug
+          path: |
+            build/app/outputs/flutter-apk/app-debug.apk
+            build/debug-size.txt
+
+      # AOT Dart + R8/Flutter tree-shaking + per-ABI native libraries.
+      # An Android release keystore has NOT been configured in this repo.
+      # This is a TEST-ONLY release build signed using Flutter's temporary
+      # debug key. Never claim it is suitable for production distribution.
+      - name: Build optimized Android ARM64 APK (test-only signing)
+        run: flutter build apk --release --split-per-abi --target-platform android-arm64
+      - name: Report ARM64 optimized APK size
+        run: |
+          test -f build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          python3 tool/apk_size_report.py build/app/outputs/flutter-apk/app-arm64-v8a-release.apk --output build/arm64-size.txt
+          cat build/arm64-size.txt
+          {
+            echo "### TTX APK size comparison"
+            echo "Debug universal:"
+            grep -m1 'APK size:' build/debug-size.txt
+            echo "Release ARM64 (test signing only):"
+            grep -m1 'APK size:' build/arm64-size.txt
+            echo "Android release APK is signed with Flutter's temporary debug key; install/update compatibility with earlier APKs is not guaranteed."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ttx-aataximeter-arm64-optimized-test-only
+          path: |
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            build/arm64-size.txt
+
