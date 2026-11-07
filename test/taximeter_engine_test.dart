@@ -70,6 +70,36 @@ void main() {
     expect(m.waitingSeconds, 60);
   });
 
+  test('stationary GPS oscillation and one speed spike are filtered', () {
+    final m = TaximeterEngine(tariff: tariff);
+    final start = DateTime(2026);
+    m.start(at: start);
+    GpsFix sample(int second, double lat, double speed) => GpsFix(
+      latitude: lat, longitude: 106, accuracyMeters: 5,
+      speedKmh: speed, timestamp: start.add(Duration(seconds: second)));
+    expect(m.acceptGps(sample(0, 21, 0)), isTrue);
+    for (var i = 1; i <= 25; i++) {
+      expect(m.acceptGps(sample(i, i.isOdd ? 21.00006 : 21, 0)), isTrue);
+    }
+    expect(m.distanceMeters, 0);
+    expect(m.acceptGps(sample(26, 21, 65)), isTrue);
+    expect(m.speedKmh, 0);
+  });
+
+  test('slow actual motion accumulates beyond accuracy-aware GPS noise', () {
+    final m = TaximeterEngine(tariff: tariff);
+    final start = DateTime(2026);
+    m.start(at: start);
+    GpsFix sample(int second, double lat) => GpsFix(
+      latitude: lat, longitude: 106, accuracyMeters: 5,
+      speedKmh: 3, timestamp: start.add(Duration(seconds: second)));
+    m.acceptGps(sample(0, 21));
+    for (var i = 1; i <= 20; i++) {
+      m.acceptGps(sample(i, 21 + i * 0.00001));
+    }
+    expect(m.distanceMeters, greaterThan(10));
+  });
+
   test('flat fare excludes distance/wait but includes extra charges', () {
     final m = TaximeterEngine(tariff: tariff);
     m.start(at: DateTime(2026), fixedFare: 250000);
