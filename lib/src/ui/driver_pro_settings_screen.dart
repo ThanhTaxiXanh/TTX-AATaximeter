@@ -64,6 +64,9 @@ class _DriverProSettingsScreenState extends State<DriverProSettingsScreen> {
     ('Quyền & hệ thống', Icons.security_outlined, [
       _SettingEntry('locationPermission', 'Quyền định vị',
         'Thiết lập quyền “Luôn cho phép”', Icons.location_on_outlined),
+      _SettingEntry('performanceDiagnostics', 'Chẩn đoán hiệu năng',
+        'Khởi động, Flutter FPS, RAM và GPS trực tiếp trên điện thoại',
+        Icons.monitor_heart_outlined),
     ]),
   ];
 
