@@ -44,6 +44,7 @@ import 'src/ui/tariff_settings_dialog.dart';
 import 'src/ui/dashboard_map.dart';
 import 'src/ui/map_presentation_gate.dart';
 import 'src/ui/frame_timing_probe.dart';
+import 'src/ui/memory_usage_probe.dart';
 import 'src/ui/led_marquee_title.dart';
 import 'src/ui/driver_pro_design.dart';
 import 'src/ui/dashboard_preferences_dialog.dart';
@@ -139,6 +140,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   final ValueNotifier<int> _mapPresentation = ValueNotifier<int>(0);
   final MapPresentationGate _mapFrameGate = MapPresentationGate();
   final FrameTimingProbe _frameTimingProbe = FrameTimingProbe();
+  late final MemoryUsageProbe _memoryUsageProbe =
+      MemoryUsageProbe(isVisible: () => mounted && _appVisible);
   bool _exportingBackup = false;
   bool _settingsBackupBusy = false;
   bool _unifiedBackupBusy = false;
@@ -180,6 +183,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _frameTimingProbe.start();
+    _memoryUsageProbe.start();
     _initializeData();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_startPreviewGps());
@@ -383,6 +387,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     _meterPresentation.dispose();
     _mapPresentation.dispose();
     _frameTimingProbe.stop();
+    _memoryUsageProbe.stop();
     _gps?.cancel();
     _previewGps?.cancel();
     repository.dispose();
