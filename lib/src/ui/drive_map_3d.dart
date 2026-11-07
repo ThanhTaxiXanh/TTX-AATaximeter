@@ -528,6 +528,46 @@ class DriveMap3DState extends State<DriveMap3D> {
     }
   }
 
+  /// Adds reviewed, localized map labels on top of the base vector map.
+  /// No territorial boundary geometry is created. This does not certify
+  /// third-party vector features or boundaries beneath the overlay.
+  Future<void> _installVietnamLabels(
+      gl.MapLibreMapController controller, int epoch) async {
+    if (!_styleActive(controller, epoch)) return;
+    try {
+      await controller.addGeoJsonSource(
+        'ttx-vietnam-maritime-labels',
+        VietnamMapSovereignty.geoJsonLabels(),
+      );
+      if (!_styleActive(controller, epoch)) return;
+      await controller.addSymbolLayer(
+        'ttx-vietnam-maritime-labels',
+        'ttx-vietnam-maritime-label-text',
+        gl.SymbolLayerProperties(
+          textField: ['get', 'name'],
+          textFont: ['Noto Sans Regular'],
+          textSize: [
+            'interpolate', ['linear'], ['zoom'],
+            3, 12, 6, 14, 10, 17
+          ],
+          textColor: '#FFFFFF',
+          textHaloColor: widget.dark ? '#091928' : '#243D5A',
+          textHaloWidth: 2.2,
+          textHaloBlur: 0.2,
+          textAllowOverlap: true,
+          textIgnorePlacement: true,
+          textPitchAlignment: 'viewport',
+        ),
+        minzoom: 3, maxzoom: 11,
+      );
+    } catch (error) {
+      // If a map style reload prevents this overlay, the view is not
+      // publishable without independent verification. Do not fabricate
+      // new boundaries or silently rewrite unknown vector features.
+      debugPrint('Vietnam-facing map label overlay unavailable: $error');
+    }
+  }
+
   Future<void> _onStyleLoaded() async {
     final controller = _map;
     if (controller == null || !mounted) return;
