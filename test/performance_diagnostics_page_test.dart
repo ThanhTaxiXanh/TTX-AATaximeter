@@ -44,7 +44,8 @@ void main() {
     expect(find.text('500 ms'), findsOneWidget);
     expect(monitor.monitoring, isTrue);
     final toggle = find.byKey(const Key('performance-overlay-toggle'));
-    await tester.ensureVisible(toggle);
+    await tester.scrollUntilVisible(toggle, 260.0,
+      scrollable: find.byType(Scrollable).first);
     await tester.pump();
     expect(find.text('Hiển thị HUD đo trên bản đồ'), findsOneWidget);
     // Change the setting directly to also cover the notifier rebuild.
