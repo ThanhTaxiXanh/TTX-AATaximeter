@@ -31,7 +31,8 @@ List<List<TripRoutePoint>> displayRouteSegments(
 /// Incremental geometry for append-only trip routes. Completed 64-fix
 /// windows are simplified once; only the open tail is recalculated as new
 /// positions arrive. This is a display cache, never a source of fare/GPS data.
-/// Replaced, truncated or edited-prefix inputs invalidate the cached windows.
+/// Replaced or truncated inputs invalidate cached windows; same-list inputs
+/// must be append-only (the established trip-route contract).
 class RouteRenderGeometryCache {
   List<TripRoutePoint>? _source;
   int _processed = 0;
