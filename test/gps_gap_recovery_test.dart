@@ -27,6 +27,33 @@ void main() {
         fix(start.add(const Duration(seconds: 3)))), isTrue);
   });
 
+  test('stationary GPS return preserves earned grace, not outage seconds', () {
+    final meter = TaximeterEngine(tariff: TariffConfig.demo());
+    meter.start(at: start);
+    expect(meter.acceptGps(fix(start)), isTrue);
+    meter.tick(start.add(const Duration(seconds: 299)));
+    meter.skipUntrustedInterval(start.add(const Duration(seconds: 330)));
+    expect(meter.elapsedSeconds, 299);
+    expect(meter.acceptGps(fix(start.add(const Duration(seconds: 331)),
+        lat: 21.02781)), isTrue);
+    meter.tick(start.add(const Duration(seconds: 333)));
+    expect(meter.elapsedSeconds, 301);
+    expect(meter.waitingSeconds, 1);
+  });
+
+  test('vehicle changed position across GPS gap: start a fresh grace', () {
+    final meter = TaximeterEngine(tariff: TariffConfig.demo());
+    meter.start(at: start);
+    meter.acceptGps(fix(start));
+    meter.tick(start.add(const Duration(seconds: 299)));
+    meter.skipUntrustedInterval(start.add(const Duration(seconds: 330)));
+    expect(meter.acceptGps(fix(start.add(const Duration(seconds: 331)),
+        lat: 21.033)), isTrue);
+    meter.tick(start.add(const Duration(seconds: 360)));
+    expect(meter.waitingSeconds, 0);
+    expect(meter.distanceMeters, 0);
+  });
+
   test('GPS blackout recovery uses new baseline, never a straight jump', () {
     final meter = TaximeterEngine(tariff: TariffConfig.demo());
     final policy = LocationTrackingPolicy();
