@@ -32,6 +32,8 @@ void main() {
     meter.start(at: start);
     expect(meter.acceptGps(fix(start)), isTrue);
     meter.tick(start.add(const Duration(seconds: 299)));
+    // Last trusted fix immediately before a short stationary blackout.
+    expect(meter.acceptGps(fix(start.add(const Duration(seconds: 299)))), isTrue);
     meter.skipUntrustedInterval(start.add(const Duration(seconds: 330)));
     expect(meter.elapsedSeconds, 299);
     // The watchdog keeps skipping through the actual recovery instant.
