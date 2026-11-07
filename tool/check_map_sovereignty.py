@@ -57,20 +57,29 @@ def check_source() -> list[str]:
     for constant, url in EXPECTED_SOURCES.items():
         assert_contains(policy, url, f"Reviewed source {constant}", errors)
     for term in ("geoJsonLabels()", "anchor_only", "approvedLabel(",
-                 "_restrictedLines"):
+                 "_restrictedLines", "geoJsonMaritimeRedactions()",
+                 "maritimeRedactionZones", "redaction_only", "not_a_boundary"):
         assert_contains(policy, term, "Vietnam label sanitizer", errors)
 
     for term in ("VietnamMapSovereignty.osmRasterTiles",
-                 "VietnamMapSovereignty.labels", "fm.MarkerLayer("):
+                 "VietnamMapSovereignty.labels", "fm.MarkerLayer(",
+                 "fm.PolygonLayer(", "maritimeRedactionZones",
+                 "borderStrokeWidth: 0"):
         assert_contains(dashboard, term, "2D renderer", errors)
     for term in ("VietnamMapSovereignty.openFreeMapDark",
                  "VietnamMapSovereignty.openFreeMapLiberty",
+                 "geoJsonMaritimeRedactions()",
+                 "controller.addFillLayer(",
+                 "fillOpacity: 1.0",
+                 "_maritimeProtectionReady",
                  "_installVietnamLabels(controller, epoch)",
                  "VietnamMapSovereignty.geoJsonLabels()",
                  "VietnamMapSovereignty.approvedLabel("):
         assert_contains(vector, term, "MapLibre renderer", errors)
     for term in ("VietnamMapSovereignty.osmRasterTiles",
-                 "VietnamMapSovereignty.labels", "MarkerLayer("):
+                 "VietnamMapSovereignty.labels", "MarkerLayer(",
+                 "PolygonLayer(", "maritimeRedactionZones",
+                 "borderStrokeWidth: 0"):
         assert_contains(trip_map, term, "History/receipt map", errors)
     assert_contains(workflow, "python3 tool/check_map_sovereignty.py",
                     "Required CI map sovereignty job", errors)
