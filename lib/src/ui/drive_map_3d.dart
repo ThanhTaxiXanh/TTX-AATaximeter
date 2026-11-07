@@ -55,6 +55,7 @@ class DriveMap3DState extends State<DriveMap3D> {
   DateTime? _lastNativeRouteUpload;
   int _lastRouteCount = -1;
   TripRoutePoint? _lastRoutePoint;
+  final RouteRenderGeometryCache _routeGeometry = RouteRenderGeometryCache();
   final FollowCameraGate _cameraGate = FollowCameraGate(
     minimumInterval: const Duration(milliseconds: 620),
     minimumDistanceMeters: 1.8,
@@ -284,7 +285,7 @@ class DriveMap3DState extends State<DriveMap3D> {
   Map<String, dynamic> _routeGeoJson() {
     // Simplification is strictly presentational. Full accepted GPS samples
     // remain in SQLite, receipts and the authoritative fare engine.
-    final valid = displayRouteSegments(widget.routePoints)
+    final valid = _routeGeometry.render(widget.routePoints)
         .map((segment) => segment.map((point) =>
             [point.longitude, point.latitude]).toList(growable: false))
         .toList(growable: false);
