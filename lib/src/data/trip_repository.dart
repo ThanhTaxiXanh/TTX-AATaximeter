@@ -5,8 +5,37 @@ import 'package:path/path.dart' as path;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import '../domain/trip_record.dart';
+import '../domain/revenue_summary.dart';
 import '../domain/trip_route_point.dart';
 import 'trip_session_snapshot.dart';
+
+/// A page of receipts; the cursor counts raw SQLite rows (including hidden
+/// empty test receipts), so pagination never skips or duplicates a row.
+class TripHistorySlice {
+  const TripHistorySlice({
+    required this.trips,
+    required this.nextRawOffset,
+    required this.hasMore,
+  });
+
+  final List<TripRecord> trips;
+  final int nextRawOffset;
+  final bool hasMore;
+}
+
+/// Aggregated over all qualifying receipts, not just the visible page.
+class TripHistoryStats {
+  const TripHistoryStats({
+    required this.tripCount,
+    required this.totalFare,
+    required this.totalDistanceKm,
+  });
+
+  final int tripCount;
+  final double totalFare, totalDistanceKm;
+
+  double get averageFare => tripCount == 0 ? 0 : totalFare / tripCount;
+}
 
 /// Transactional storage for completed fares. Never use prefs for critical trips.
 class TripRepository {
@@ -312,6 +341,101 @@ class TripRepository {
     final rows = await db.query('trips', orderBy: 'started_at DESC');
     return rows.map((row) =>
         TripRecord.decode(row['payload']! as String)).toList(growable: false);
+  }
+
+  /// Period selection is local to the driver's phone, but timestamps are
+  /// compared as instants. SQLite julianday handles UTC and explicit offsets;
+  /// lexicographic comparisons between mixed ISO8601 offsets would be wrong.
+  static (String, List<Object>) _historyWindow(
+      RevenuePeriod period, DateTime now) {
+    final start = RevenueSummary.periodStart(period, now);
+    final where = StringBuffer('julianday(started_at) <= julianday(?)');
+    final args = <Object>[now.toUtc().toIso8601String()];
+    if (start != null) {
+      where.write(' AND julianday(started_at) >= julianday(?)');
+      args.add(start.toUtc().toIso8601String());
+    }
+    return (where.toString(), args);
+  }
+
+  static bool _businessTrip(TripRecord trip) {
+    final r = trip.receipt;
+    return r.totalFare > 0 || r.distanceKm > 0 ||
+        r.durationSeconds > 0;
+  }
+
+  /// Load a bounded number of full receipts, including their exact saved
+  /// route payloads. Never mutate, rewrite or truncate stored history.
+  Future<TripHistorySlice> listTripsPage({
+    required RevenuePeriod period,
+    required DateTime now,
+    int rawOffset = 0,
+    int pageSize = 25,
+  }) async {
+    if (rawOffset < 0 || pageSize < 1 || pageSize > 100) {
+      throw RangeError('Invalid history pagination');
+    }
+    final db = await _db;
+    final (where, args) = _historyWindow(period, now);
+    final rows = await db.rawQuery(
+      'SELECT payload FROM trips WHERE $where '
+      'ORDER BY julianday(started_at) DESC, id DESC LIMIT ? OFFSET ?',
+      [...args, pageSize + 1, rawOffset],
+    );
+    final pageRows = rows.take(pageSize);
+    final trips = <TripRecord>[];
+    for (final row in pageRows) {
+      final trip = TripRecord.decode(row['payload']! as String);
+      if (_businessTrip(trip)) trips.add(trip);
+    }
+    return TripHistorySlice(
+      trips: List<TripRecord>.unmodifiable(trips),
+      nextRawOffset: rawOffset + pageRows.length,
+      hasMore: rows.length > pageSize,
+    );
+  }
+
+  /// Read-only SQL aggregation avoids decoding every large GPS route to
+  /// calculate revenue. Preserve the legacy rule: an otherwise-zero ride
+  /// with a positive duration is real and must still appear in totals.
+  /// Only zero-fare AND zero-distance rows require payload inspection.
+  Future<TripHistoryStats> readTripHistoryStats({
+    required RevenuePeriod period,
+    required DateTime now,
+  }) async {
+    final db = await _db;
+    final (where, args) = _historyWindow(period, now);
+    return db.transaction((txn) async {
+      final summary = (await txn.rawQuery(
+        'SELECT COUNT(*) AS count, '
+        'COALESCE(SUM(total_fare), 0) AS fare, '
+        'COALESCE(SUM(distance_km), 0) AS distance '
+        'FROM trips WHERE $where '
+        'AND (total_fare > 0 OR distance_km > 0)',
+        args,
+      )).single;
+      var count = (summary['count'] as num).toInt();
+      var fare = (summary['fare'] as num).toDouble();
+      var distance = (summary['distance'] as num).toDouble();
+
+      final zeroRows = await txn.rawQuery(
+        'SELECT payload FROM trips WHERE $where '
+        'AND total_fare <= 0 AND distance_km <= 0',
+        args,
+      );
+      for (final row in zeroRows) {
+        final trip = TripRecord.decode(row['payload']! as String);
+        if (!_businessTrip(trip)) continue;
+        count++;
+        fare += trip.receipt.totalFare;
+        distance += trip.receipt.distanceKm;
+      }
+      return TripHistoryStats(
+        tripCount: count,
+        totalFare: fare,
+        totalDistanceKm: distance,
+      );
+    });
   }
 
   Future<void> delete(String id) async {
