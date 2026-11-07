@@ -165,7 +165,7 @@ class _PerformanceDiagnosticsPageState
                 _metric('Khung Flutter đầu', _intMs(m.firstFrameMs),
                     Icons.rocket_launch_outlined),
                 _metric('Khôi phục dữ liệu', _intMs(m.storageReadyMs),
-                    Icons.database_outlined),
+                    Icons.storage_outlined),
                 _metric('Flutter FPS quan sát',
                     m.flutterFps?.toStringAsFixed(1) ?? '—',
                     Icons.speed_outlined, color: DriverProColors.green),
