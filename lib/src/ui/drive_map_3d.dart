@@ -10,6 +10,7 @@ import 'navigation_camera_filter.dart';
 import 'road_label_style.dart';
 import 'nearest_road_name.dart';
 import 'route_render_geometry.dart';
+import 'road_query_gate.dart';
 
 /// GPS arrow is a native geo-referenced symbol, not a fixed HUD overlay.
 /// Native MapLibre vector map with pitch, heading-up camera and OSM buildings.
@@ -67,7 +68,7 @@ class DriveMap3DState extends State<DriveMap3D> {
   bool _cameraQueuedForce = false;
   double _zoom = 17;
   bool _followCar = true;
-  DateTime? _lastRoadQuery;
+  final RoadQueryGate _roadQueryGate = RoadQueryGate();
   bool _roadQueryBusy = false;
 
   bool get _hasFix {
@@ -124,7 +125,7 @@ class DriveMap3DState extends State<DriveMap3D> {
       _lastRoutePoint = null;
       _cameraGate.reset();
       _visualCamera.reset();
-      _lastRoadQuery = null;
+      _roadQueryGate.reset();
       // MapLibreMap changes styleString and recreates style layers.
     }
     if (oldWidget.flat2D != widget.flat2D) {
@@ -479,19 +480,21 @@ class DriveMap3DState extends State<DriveMap3D> {
     final controller = _map;
     if (controller == null || !_styleReady || !_hasFix ||
         _roadQueryBusy || widget.onRoadNameChanged == null) return;
-    final now = DateTime.now();
-    if (!force && _lastRoadQuery != null &&
-        now.difference(_lastRoadQuery!) < const Duration(seconds: 6)) return;
-    _lastRoadQuery = now;
+    final latitude = widget.latitude!, longitude = widget.longitude!;
+    if (!_roadQueryGate.shouldQuery(
+      now: DateTime.now(), latitude: latitude,
+      longitude: longitude, force: force,
+    )) return;
+    final bearing = widget.speedKmh >= 6 ? _heading : null;
     _roadQueryBusy = true;
     try {
       final features = await controller.querySourceFeatures(
         'openmaptiles', 'transportation_name', null);
       if (!mounted || !identical(_map, controller) || !_styleReady) return;
       final name = nearestRoadName(features,
-        latitude: widget.latitude!,
-        longitude: widget.longitude!,
-        bearingDegrees: widget.speedKmh >= 6 ? _heading : null);
+        latitude: latitude, longitude: longitude,
+        bearingDegrees: bearing);
+      _roadQueryGate.reportName(name);
       widget.onRoadNameChanged?.call(name);
     } catch (error) {
       debugPrint('Nearby OSM road name unavailable: $error');
@@ -513,7 +516,7 @@ class DriveMap3DState extends State<DriveMap3D> {
     _lastRoutePoint = null;
     _cameraGate.reset();
     _visualCamera.reset();
-    _lastRoadQuery = null;
+    _roadQueryGate.reset();
     await _enhanceRoadStyle(controller);
     if (!widget.flat2D) {
       // Both OpenFreeMap Liberty and Dark use the OpenMapTiles "building"
