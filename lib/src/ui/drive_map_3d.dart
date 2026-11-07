@@ -11,6 +11,7 @@ import 'road_label_style.dart';
 import 'nearest_road_name.dart';
 import 'route_render_geometry.dart';
 import 'road_query_gate.dart';
+import 'map_style_epoch.dart';
 
 /// GPS arrow is a native geo-referenced symbol, not a fixed HUD overlay.
 /// Native MapLibre vector map with pitch, heading-up camera and OSM buildings.
@@ -69,7 +70,12 @@ class DriveMap3DState extends State<DriveMap3D> {
   double _zoom = 17;
   bool _followCar = true;
   final RoadQueryGate _roadQueryGate = RoadQueryGate();
+  final MapStyleEpoch _styleEpoch = MapStyleEpoch();
   bool _roadQueryBusy = false;
+
+  bool _styleActive(gl.MapLibreMapController controller, int epoch) =>
+      mounted && _styleReady && identical(_map, controller) &&
+      _styleEpoch.isCurrent(epoch);
 
   bool get _hasFix {
     final lat = widget.latitude, lon = widget.longitude;
@@ -115,6 +121,7 @@ class DriveMap3DState extends State<DriveMap3D> {
   void didUpdateWidget(covariant DriveMap3D oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.dark != widget.dark) {
+      _styleEpoch.invalidate();
       _routeRenderTimer?.cancel();
       _routeRenderTimer = null;
       _lastNativeRouteUpload = null;
@@ -338,10 +345,12 @@ class DriveMap3DState extends State<DriveMap3D> {
   /// Improve only visible road line and road-name style layers.
   /// The actual provider Dark style uses grey #505050 road labels and
   /// near-black roads, which become invisible in tilted night navigation.
-  Future<void> _enhanceRoadStyle(gl.MapLibreMapController controller) async {
+  Future<void> _enhanceRoadStyle(
+      gl.MapLibreMapController controller, int epoch) async {
     try {
       final style = await controller.getStyle();
-      if (style == null || style.isEmpty) return;
+      if (style == null || style.isEmpty ||
+          !_styleActive(controller, epoch)) return;
       if (widget.dark) {
         try {
           await controller.setLayerProperties('background',
@@ -353,7 +362,7 @@ class DriveMap3DState extends State<DriveMap3D> {
         // The native Dark style has many almost-black landuse polygons;
         // recoloring background alone leaves a nearly black map.
         for (final entry in darkSurfaceLayerColors(style).entries) {
-          if (!mounted || !_styleReady || !identical(_map, controller)) return;
+          if (!_styleActive(controller, epoch)) return;
           try {
             await controller.setLayerProperties(
               entry.key, gl.FillLayerProperties(fillColor: entry.value));
@@ -363,7 +372,7 @@ class DriveMap3DState extends State<DriveMap3D> {
         }
         final colors = darkRoadLayerColors(style);
         for (final entry in colors.entries) {
-          if (!mounted || !_styleReady || !identical(_map, controller)) return;
+          if (!_styleActive(controller, epoch)) return;
           try {
             final isInner = entry.key == 'highway_minor' ||
                 entry.key == 'highway_major_inner' ||
@@ -384,7 +393,7 @@ class DriveMap3DState extends State<DriveMap3D> {
         }
       }
       for (final id in roadNameSymbolLayerIds(style)) {
-        if (!mounted || !_styleReady || !identical(_map, controller)) return;
+        if (!_styleActive(controller, epoch)) return;
         try {
           await controller.setLayerProperties(
             id,
@@ -412,7 +421,7 @@ class DriveMap3DState extends State<DriveMap3D> {
   /// by symbol collisions. The new layer draws named OSM road segments
   /// in the road geometry itself, in Vietnamese when present.
   Future<void> _installReadableRoadLabels(
-      gl.MapLibreMapController controller) async {
+      gl.MapLibreMapController controller, int epoch) async {
     try {
       await controller.addSymbolLayer(
         'openmaptiles',
@@ -456,10 +465,12 @@ class DriveMap3DState extends State<DriveMap3D> {
       );
       // Avoid two labels for the same segment. Only hide native labels
       // if the replacement was created successfully.
-      if (mounted && identical(_map, controller) && _styleReady) {
+      if (_styleActive(controller, epoch)) {
         final style = await controller.getStyle();
+        if (!_styleActive(controller, epoch)) return;
         if (style != null && style.isNotEmpty) {
           for (final id in roadNameSymbolLayerIds(style)) {
+            if (!_styleActive(controller, epoch)) return;
             try {
               await controller.setLayerVisibility(id, false);
             } catch (error) {
@@ -506,6 +517,7 @@ class DriveMap3DState extends State<DriveMap3D> {
   Future<void> _onStyleLoaded() async {
     final controller = _map;
     if (controller == null || !mounted) return;
+    final epoch = _styleEpoch.begin();
     _styleReady = true;
     _routeRenderTimer?.cancel();
     _routeRenderTimer = null;
@@ -517,7 +529,8 @@ class DriveMap3DState extends State<DriveMap3D> {
     _cameraGate.reset();
     _visualCamera.reset();
     _roadQueryGate.reset();
-    await _enhanceRoadStyle(controller);
+    await _enhanceRoadStyle(controller, epoch);
+    if (!_styleActive(controller, epoch)) return;
     if (!widget.flat2D) {
       // Both OpenFreeMap Liberty and Dark use the OpenMapTiles "building"
       // vector source layer. Where OSM has no height, a modest 9m extrusion
@@ -544,9 +557,12 @@ class DriveMap3DState extends State<DriveMap3D> {
         debugPrint('3D building layer not available: $error');
       }
     }
-    await _installReadableRoadLabels(controller);
+    if (!_styleActive(controller, epoch)) return;
+    await _installReadableRoadLabels(controller, epoch);
+    if (!_styleActive(controller, epoch)) return;
     try {
       await controller.addGeoJsonSource('ttx-route', _routeGeoJson());
+      if (!_styleActive(controller, epoch)) return;
       await controller.addLineLayer(
         'ttx-route',
         'ttx-route-line',
@@ -556,6 +572,7 @@ class DriveMap3DState extends State<DriveMap3D> {
           lineOpacity: 0.9,
         ),
       );
+      if (!_styleActive(controller, epoch)) return;
       _routeReady = true;
       _lastRouteCount = widget.routePoints.length;
       _lastRoutePoint = widget.routePoints.isEmpty
@@ -567,10 +584,13 @@ class DriveMap3DState extends State<DriveMap3D> {
     // The arrow is anchored at the true WGS84 GPS fix. The camera can be
     // aimed ahead of the car independently without changing the GPS position.
     try {
-      await controller.addImage('ttx-3d-navigation-arrow',
-        await _cachedArrowImage());
+      final image = await _cachedArrowImage();
+      if (!_styleActive(controller, epoch)) return;
+      await controller.addImage('ttx-3d-navigation-arrow', image);
+      if (!_styleActive(controller, epoch)) return;
       await controller.addGeoJsonSource('ttx-gps-arrow-position',
         gpsArrowGeoJson(widget.latitude, widget.longitude, _heading));
+      if (!_styleActive(controller, epoch)) return;
       await controller.addSymbolLayer(
         'ttx-gps-arrow-position', 'ttx-gps-arrow',
         const gl.SymbolLayerProperties(
@@ -585,12 +605,13 @@ class DriveMap3DState extends State<DriveMap3D> {
           iconRotate: ['get', 'heading'],
         ),
       );
+      if (!_styleActive(controller, epoch)) return;
       _arrowReady = true;
       unawaited(_refreshArrow());
     } catch (error) {
       debugPrint('GPS navigation arrow layer unavailable: $error');
     }
-    if (mounted) {
+    if (_styleActive(controller, epoch)) {
       _moveToCar(force: true);
       unawaited(_updateCurrentRoad(force: true));
     }
@@ -598,7 +619,11 @@ class DriveMap3DState extends State<DriveMap3D> {
 
   @override
   void dispose() {
+    _styleEpoch.dispose();
     _routeRenderTimer?.cancel();
+    _routeRenderTimer = null;
+    _routeGeometry.reset();
+    _map = null;
     super.dispose();
   }
 
@@ -621,7 +646,10 @@ class DriveMap3DState extends State<DriveMap3D> {
       scrollGesturesEnabled: true,
       foregroundLoadColor: widget.dark
           ? const Color(0xFF101A28) : const Color(0xFFEEEAE0),
-      onMapCreated: (controller) => _map = controller,
+      onMapCreated: (controller) {
+        if (!identical(_map, controller)) _styleEpoch.invalidate();
+        _map = controller;
+      },
       onStyleLoadedCallback: () => unawaited(_onStyleLoaded()),
     ),
     ),
