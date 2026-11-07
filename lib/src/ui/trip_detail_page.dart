@@ -100,6 +100,20 @@ class _TripRouteMapState extends State<TripRouteMap> {
               urlTemplate: VietnamMapSovereignty.osmRasterTiles,
               userAgentPackageName: 'vn.thanhtaxixanh.ttx_aataximeter',
             ),
+            // History/receipt map uses the same offshore redaction policy.
+            PolygonLayer(polygons: [
+              for (final zone in VietnamMapSovereignty.maritimeRedactionZones)
+                Polygon(
+                  points: [
+                    LatLng(zone.south, zone.west),
+                    LatLng(zone.south, zone.east),
+                    LatLng(zone.north, zone.east),
+                    LatLng(zone.north, zone.west),
+                  ],
+                  color: const Color(0xFFB7D7E8),
+                  borderStrokeWidth: 0,
+                ),
+            ]),
             if (lines.isNotEmpty) PolylineLayer(polylines: lines),
             MarkerLayer(markers: [
               // App-owned Vietnam-facing island/sea names are displayed
