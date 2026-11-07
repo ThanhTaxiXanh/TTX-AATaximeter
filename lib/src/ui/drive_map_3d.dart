@@ -252,7 +252,9 @@ class DriveMap3DState extends State<DriveMap3D> {
 
   Future<void> _refreshArrow() async {
     final controller = _map;
-    if (controller == null || !mounted || !_arrowReady) return;
+    final epoch = _styleEpoch.revision;
+    if (controller == null || !_styleActive(controller, epoch) ||
+        !_arrowReady) return;
     if (_updatingArrow) {
       _arrowDirty = true; // Latest GPS wins; do not queue old positions.
       return;
@@ -260,11 +262,12 @@ class DriveMap3DState extends State<DriveMap3D> {
     _updatingArrow = true;
     try {
       do {
+        if (!_styleActive(controller, epoch)) break;
         _arrowDirty = false;
         await controller.setGeoJsonSource('ttx-gps-arrow-position',
           gpsArrowGeoJson(widget.latitude, widget.longitude, _heading));
-      } while (_arrowDirty && mounted && _arrowReady &&
-          identical(_map, controller));
+      } while (_arrowDirty && _arrowReady &&
+          _styleActive(controller, epoch));
     } catch (error) {
       debugPrint('Cannot update GPS arrow: $error');
     } finally {
@@ -314,7 +317,9 @@ class DriveMap3DState extends State<DriveMap3D> {
 
   Future<void> _refreshRoute() async {
     final controller = _map;
-    if (!_routeReady || controller == null || !mounted) return;
+    final epoch = _styleEpoch.revision;
+    if (!_routeReady || controller == null ||
+        !_styleActive(controller, epoch)) return;
     if (_updatingRoute) {
       _routeDirty = true;
       return;
@@ -322,19 +327,19 @@ class DriveMap3DState extends State<DriveMap3D> {
     _updatingRoute = true;
     try {
       do {
+        if (!_styleActive(controller, epoch)) break;
         _routeDirty = false;
         final count = widget.routePoints.length;
         final last = count == 0 ? null : widget.routePoints.last;
         if (count == _lastRouteCount &&
             identical(last, _lastRoutePoint)) break;
         await controller.setGeoJsonSource('ttx-route', _routeGeoJson());
-        if (!mounted || !_routeReady ||
-            !identical(_map, controller)) break;
+        if (!_styleActive(controller, epoch) || !_routeReady) break;
         _lastRouteCount = count;
         _lastRoutePoint = last;
         _lastNativeRouteUpload = DateTime.now();
-      } while (_routeDirty && mounted && _routeReady &&
-          identical(_map, controller));
+      } while (_routeDirty && _routeReady &&
+          _styleActive(controller, epoch));
     } catch (error) {
       debugPrint('Cannot update 3D journey line: $error');
     } finally {
@@ -491,6 +496,7 @@ class DriveMap3DState extends State<DriveMap3D> {
     final controller = _map;
     if (controller == null || !_styleReady || !_hasFix ||
         _roadQueryBusy || widget.onRoadNameChanged == null) return;
+    final epoch = _styleEpoch.revision;
     final latitude = widget.latitude!, longitude = widget.longitude!;
     if (!_roadQueryGate.shouldQuery(
       now: DateTime.now(), latitude: latitude,
@@ -501,7 +507,7 @@ class DriveMap3DState extends State<DriveMap3D> {
     try {
       final features = await controller.querySourceFeatures(
         'openmaptiles', 'transportation_name', null);
-      if (!mounted || !identical(_map, controller) || !_styleReady) return;
+      if (!_styleActive(controller, epoch)) return;
       final name = nearestRoadName(features,
         latitude: latitude, longitude: longitude,
         bearingDegrees: bearing);
@@ -511,6 +517,12 @@ class DriveMap3DState extends State<DriveMap3D> {
       debugPrint('Nearby OSM road name unavailable: $error');
     } finally {
       _roadQueryBusy = false;
+      // A style switch may have invalidated an in-flight vector query.
+      // Retry once the replacement style is ready, not on a disposed map.
+      if (mounted && _styleReady && !_styleEpoch.isCurrent(epoch) &&
+          widget.onRoadNameChanged != null) {
+        unawaited(_updateCurrentRoad(force: true));
+      }
     }
   }
 
