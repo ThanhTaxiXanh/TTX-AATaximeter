@@ -14,6 +14,8 @@ class MapStyleEpoch {
     if (!_disposed) _revision++;
   }
 
+  int get revision => _revision;
+
   bool isCurrent(int revision) => !_disposed && revision == _revision;
 
   void dispose() {
