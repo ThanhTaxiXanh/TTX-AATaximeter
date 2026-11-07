@@ -28,6 +28,47 @@ abstract final class VietnamMapSovereignty {
     MapSovereigntyLabel(bienDong, 13.5, 114.9),
   ];
 
+  /// Temporary visual redaction of unverified third-party imagery/vector
+  /// features in the offshore area. NOT territorial boundaries, not a
+  /// cartographic dataset, and not a claim that all disputed content is gone.
+  /// Keep the area inland-free to preserve road-based taxi navigation.
+  /// Replacement with reviewed geographic data requires a new source audit.
+  static const maritimeRedactionZones = <MaritimeRedactionZone>[
+    MaritimeRedactionZone('Hoàng Sa', 110.0, 14.5, 115.0, 18.3),
+    MaritimeRedactionZone('Trường Sa', 109.8, 6.0, 118.3, 12.5),
+    MaritimeRedactionZone('Biển Đông', 110.4, 12.4, 119.4, 17.6),
+  ];
+
+  /// Opaque visual coverings drawn OVER remote labels/boundaries and UNDER
+  /// app-controlled labels and the live GPS route. Never draw a polygon
+  /// outline; the rectangles are NOT sovereign/administrative boundaries.
+  static Map<String, dynamic> geoJsonMaritimeRedactions() => {
+    'type': 'FeatureCollection',
+    'features': [
+      for (final zone in maritimeRedactionZones) {
+        'type': 'Feature',
+        'properties': {
+          'name': zone.name,
+          'redaction_only': true,
+          'not_a_boundary': true,
+          'policy': 'TTX-VN-MAP-01',
+        },
+        'geometry': {
+          'type': 'Polygon',
+          'coordinates': [
+            [
+              [zone.west, zone.south],
+              [zone.east, zone.south],
+              [zone.east, zone.north],
+              [zone.west, zone.north],
+              [zone.west, zone.south],
+            ],
+          ],
+        },
+      },
+    ],
+  };
+
   static const _aliases = <(String, String)>[
     ('South China Sea', bienDong),
     ('South China sea', bienDong),
@@ -100,4 +141,14 @@ class MapSovereigntyLabel {
 
   final String name;
   final double latitude, longitude;
+}
+
+/// Axis-aligned display suppression rectangle, never a territorial geometry.
+/// Source tiles remain unverified outside these temporary coverings too.
+class MaritimeRedactionZone {
+  const MaritimeRedactionZone(
+    this.name, this.west, this.south, this.east, this.north,
+  );
+  final String name;
+  final double west, south, east, north;
 }
