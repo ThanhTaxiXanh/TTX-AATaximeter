@@ -238,6 +238,9 @@ class TaximeterEngine {
   DateTime? startedAt;
   DateTime? _lastTick;
   GpsFix? _lastFix;
+  GpsFix? _distanceAnchor; // Stable anchor for accuracy-aware GPS distance.
+  GpsFix? _waitGraceAnchor; // Pre-gap fix for a verified stationary recovery.
+  int _waitGraceAtGap = 0;
   double distanceMeters = 0;
   int elapsedSeconds = 0;
   int waitingSeconds = 0;
@@ -272,6 +275,9 @@ class TaximeterEngine {
     startedAt = at ?? DateTime.now();
     _lastTick = startedAt;
     _lastFix = null;
+    _distanceAnchor = null;
+    _waitGraceAnchor = null;
+    _waitGraceAtGap = 0;
     flatFare = fixedFare;
     _interrupted = false;
     _consecutiveWaitSeconds = 0;
@@ -318,6 +324,9 @@ class TaximeterEngine {
     _lastTick = now;
     status = MeterStatus.running;
     _lastFix = null; // New baseline: do not invent distance during the gap.
+    _distanceAnchor = null;
+    _waitGraceAnchor = null;
+    _waitGraceAtGap = 0;
     _consecutiveWaitSeconds = 0;
     speedKmh = 0;
   }
@@ -334,6 +343,9 @@ class TaximeterEngine {
     status = MeterStatus.paused;
     speedKmh = 0;
     _lastFix = null;
+    _distanceAnchor = null;
+    _waitGraceAnchor = null;
+    _waitGraceAtGap = 0;
     _lastTick = now;
   }
 
@@ -414,17 +426,17 @@ class TaximeterEngine {
     return restored;
   }
 
-  /// Validate the physical GPS sample *before* modifying any trip state.
-  /// In particular, an inaccurate fix must not reset a GPS-gap baseline.
+  /// Do not treat GPS speed anomalies or unreliable coordinates as a fix.
   bool isValidGpsObservation(GpsFix fix) =>
       fix.latitude.isFinite && fix.longitude.isFinite &&
       fix.latitude.abs() <= 90 && fix.longitude.abs() <= 180 &&
       fix.accuracyMeters.isFinite && fix.accuracyMeters >= 0 &&
       fix.accuracyMeters <= _tariff.gpsMaxAccuracyMeters &&
-      fix.speedKmh.isFinite && fix.speedKmh >= 0;
+      fix.speedKmh.isFinite && fix.speedKmh >= 0 &&
+      fix.speedKmh <= 220;
 
-  /// Returns true only for valid telemetry actually accepted by the meter.
-  /// A rejected outlier must not refresh the UI's GPS freshness watchdog.
+  /// Accept physical positions, filter stop jitter, and measure against an
+  /// accuracy-aware anchor; map-camera smoothing never affects trip fare.
   bool acceptGps(GpsFix fix) {
     if (!isValidGpsObservation(fix)) return false;
 
@@ -435,7 +447,22 @@ class TaximeterEngine {
     }
     final before = _lastFix;
     if (before == null) {
+      // Never charge GPS blackout time. Retain the already-earned waiting
+      // grace only when the new fix verifies this same stationary stop.
+      final gap = _waitGraceAnchor;
+      if (gap != null && _waitGraceAtGap > 0 &&
+          fix.speedKmh < _tariff.waitingSpeedThresholdKmh &&
+          !fix.timestamp.isBefore(gap.timestamp) &&
+          fix.timestamp.difference(gap.timestamp) <=
+              const Duration(minutes: 2) &&
+          _haversine(gap, fix) <= math.max(15.0,
+              (gap.accuracyMeters + fix.accuracyMeters) * 1.25)) {
+        _consecutiveWaitSeconds = _waitGraceAtGap;
+      }
+      _waitGraceAnchor = null;
+      _waitGraceAtGap = 0;
       _lastFix = fix;
+      _distanceAnchor = fix;
       speedKmh = fix.speedKmh;
       maxSpeedKmh = math.max(maxSpeedKmh, speedKmh);
       return true;
@@ -444,29 +471,53 @@ class TaximeterEngine {
     final seconds =
         fix.timestamp.difference(before.timestamp).inMilliseconds / 1000;
     final meters = _haversine(before, fix);
-    final plausibleMax = math.max(25.0, seconds * 65.0);
-    // Reject GPS jumps without replacing the last known-good fix.
-    if (meters > plausibleMax) return false;
+    if (meters > math.max(25.0, seconds * 65.0)) return false;
+
+    final previousSpeed = speedKmh;
+    final nearStill = meters <= math.max(8.0,
+        math.max(before.accuracyMeters, fix.accuracyMeters) * 1.3);
+    // A single speed spike with negligible movement must not reset a stop.
+    final filteredSpeed = nearStill &&
+            previousSpeed < _tariff.waitingSpeedThresholdKmh &&
+            fix.speedKmh >= _tariff.waitingSpeedThresholdKmh
+        ? previousSpeed : fix.speedKmh;
     _lastFix = fix;
-    speedKmh = fix.speedKmh;
+    speedKmh = filteredSpeed;
     maxSpeedKmh = math.max(maxSpeedKmh, speedKmh);
-    final noiseFloor = math.max(
-      3.0, math.max(before.accuracyMeters, fix.accuracyMeters) * 0.5,
-    );
-    if (meters > noiseFloor) {
-      distanceMeters += meters * _tariff.gpsCalibrationMultiplier;
+
+    final anchor = _distanceAnchor ?? before;
+    final displacement = _haversine(anchor, fix);
+    final stationary = previousSpeed < 2.5 && filteredSpeed < 2.5;
+    final noiseFloor = math.max(stationary ? 15.0 : 5.0,
+        math.max(anchor.accuracyMeters, fix.accuracyMeters) *
+            (stationary ? 2.0 : 1.0));
+    // Ignore short multipath oscillations; slow real movement can accumulate
+    // across several small fixes rather than being discarded permanently.
+    if (displacement > noiseFloor &&
+        (!stationary || fix.timestamp.difference(anchor.timestamp) >=
+            const Duration(seconds: 15))) {
+      distanceMeters += displacement * _tariff.gpsCalibrationMultiplier;
+      _distanceAnchor = fix;
     }
     return true;
   }
 
-  /// Advance the internal monotonic meter tick reference without charging
-  /// waiting time or inventing distance during an untrusted GPS interval.
+  /// Do not count untrusted seconds/km. Save free-wait progress provisionally
+  /// so a subsequent same-place GPS fix can prove the stop was continuous.
   void skipUntrustedInterval(DateTime at) {
     if ((status != MeterStatus.running && status != MeterStatus.paused) ||
         _interrupted) return;
     if (_lastTick == null || at.isBefore(_lastTick!)) return;
+    if (status == MeterStatus.running && _lastFix != null &&
+        _consecutiveWaitSeconds > 0 &&
+        speedKmh < _tariff.waitingSpeedThresholdKmh &&
+        _waitGraceAnchor == null) {
+      _waitGraceAnchor = _lastFix;
+      _waitGraceAtGap = _consecutiveWaitSeconds;
+    }
     _lastTick = at;
     _lastFix = null;
+    _distanceAnchor = null;
     _consecutiveWaitSeconds = 0;
     speedKmh = 0;
   }
@@ -542,6 +593,9 @@ class TaximeterEngine {
     startedAt = null;
     _lastTick = null;
     _lastFix = null;
+    _distanceAnchor = null;
+    _waitGraceAnchor = null;
+    _waitGraceAtGap = 0;
     distanceMeters = 0;
     elapsedSeconds = 0;
     waitingSeconds = 0;
