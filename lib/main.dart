@@ -144,8 +144,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   final FrameTimingProbe _frameTimingProbe = FrameTimingProbe();
   late final MemoryUsageProbe _memoryUsageProbe =
       MemoryUsageProbe(isVisible: () => mounted && _appVisible);
-  late final PerformanceMonitor _performanceMonitor =
-      PerformanceMonitor(isVisible: () => mounted && _appVisible);
+  late final PerformanceMonitor _performanceMonitor;
   bool _exportingBackup = false;
   bool _settingsBackupBusy = false;
   bool _unifiedBackupBusy = false;
@@ -185,6 +184,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   @override
   void initState() {
     super.initState();
+    // Start the clock before SQLite, preferences and first frame work.
+    _performanceMonitor = PerformanceMonitor(
+      isVisible: () => mounted && _appVisible);
     WidgetsBinding.instance.addObserver(this);
     _frameTimingProbe.start();
     _memoryUsageProbe.start();
