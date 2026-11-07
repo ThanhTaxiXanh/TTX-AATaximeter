@@ -26,8 +26,34 @@ class TripHistoryPage extends StatefulWidget {
 
 class _TripHistoryPageState extends State<TripHistoryPage> {
   List<TripRecord> _trips = [];
+  TripHistoryStats _stats = const TripHistoryStats(
+    tripCount: 0, totalFare: 0, totalDistanceKm: 0);
   RevenuePeriod _period = RevenuePeriod.today;
   bool _loading = true;
+  bool _loadingMore = false;
+  bool _hasMore = false;
+  int _nextRawOffset = 0;
+  int _requestGeneration = 0;
+
+  static const _pageSize = 25;
+
+  /// Automatically skip hidden zero/zero/zero test receipts when the next
+  /// physical SQLite page contains no business trips.
+  Future<TripHistorySlice> _visiblePage({
+    required RevenuePeriod period,
+    required DateTime now,
+    required int rawOffset,
+  }) async {
+    var page = await widget.repository.listTripsPage(
+      period: period, now: now,
+      rawOffset: rawOffset, pageSize: _pageSize);
+    while (page.trips.isEmpty && page.hasMore) {
+      page = await widget.repository.listTripsPage(
+        period: period, now: now,
+        rawOffset: page.nextRawOffset, pageSize: _pageSize);
+    }
+    return page;
+  }
 
   @override
   void initState() {
@@ -36,17 +62,57 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
   }
 
   Future<void> _load() async {
+    final generation = ++_requestGeneration;
+    final period = _period;
+    final now = DateTime.now();
+    setState(() {
+      _loading = true;
+      _loadingMore = false;
+    });
     try {
-      final saved = await widget.repository.listTrips();
-      if (mounted) setState(() {
-        _trips = saved;
+      // Stats include every completed trip in the selected period.
+      // Only 25 raw rows are decoded at a time for the visible history.
+      final stats = await widget.repository.readTripHistoryStats(
+        period: period, now: now);
+      final page = await _visiblePage(
+        period: period, now: now, rawOffset: 0);
+      if (!mounted || generation != _requestGeneration) return;
+      setState(() {
+        _stats = stats;
+        _trips = page.trips;
+        _nextRawOffset = page.nextRawOffset;
+        _hasMore = page.hasMore;
         _loading = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _requestGeneration) return;
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Không đọc được lịch sử: ' + error.toString())));
+        SnackBar(content: Text('Không đọc được lịch sử: $error')));
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loading || _loadingMore || !_hasMore) return;
+    final generation = _requestGeneration;
+    final period = _period;
+    final offset = _nextRawOffset;
+    setState(() => _loadingMore = true);
+    try {
+      final page = await _visiblePage(
+        period: period, now: DateTime.now(), rawOffset: offset);
+      if (!mounted || generation != _requestGeneration) return;
+      setState(() {
+        _trips = [..._trips, ...page.trips];
+        _nextRawOffset = page.nextRawOffset;
+        _hasMore = page.hasMore;
+        _loadingMore = false;
+      });
+    } catch (error) {
+      if (!mounted || generation != _requestGeneration) return;
+      setState(() => _loadingMore = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Không tải được trang tiếp theo: $error')));
     }
   }
 
@@ -100,7 +166,11 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
     child: Row(children: [
       for (final period in RevenuePeriod.values)
         Expanded(child: InkWell(
-          onTap: () => setState(() => _period = period),
+          onTap: () {
+            if (_period == period) return;
+            setState(() => _period = period);
+            _load();
+          },
           borderRadius: BorderRadius.circular(20),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
@@ -219,10 +289,46 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
     );
   }
 
+  Widget _reportHeader(TripHistoryStats report) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _periodPicker(),
+      const SizedBox(height: 11),
+      Row(children: [
+        Expanded(child: _statCard(Icons.attach_money,
+          const Color(0xFF28CB60),
+          _cash(report.totalFare), 'Tổng doanh thu')),
+        const SizedBox(width: 10),
+        Expanded(child: _statCard(Icons.local_taxi,
+          const Color(0xFF168FFF),
+          report.tripCount.toString(), 'Tổng số chuyến')),
+      ]),
+      const SizedBox(height: 8),
+      Row(children: [
+        Expanded(child: _statCard(Icons.map_outlined,
+          const Color(0xFFFF9731),
+          report.totalDistanceKm.toStringAsFixed(1) + ' km',
+          'Tổng quãng đường')),
+        const SizedBox(width: 10),
+        Expanded(child: _statCard(Icons.bar_chart,
+          const Color(0xFFD13FEC),
+          _cash(report.averageFare), 'Tiền TB/chuyến')),
+      ]),
+      const SizedBox(height: 12),
+      const Text('Lịch sử chuyến đi',
+        style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 13),
+      if (_trips.isEmpty && !_hasMore)
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 40),
+          child: Center(child: Text('Không có chuyến đi trong kỳ',
+            style: TextStyle(color: Colors.white60))),
+        ),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) {
-    final report = RevenueSummary.calculate(
-      _trips, period: _period, now: DateTime.now());
     return Scaffold(
       backgroundColor: DriverProColors.background,
       appBar: AppBar(
@@ -233,7 +339,7 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
         actions: [
           PopupMenuButton<String>(
             tooltip: 'Quản lý lịch sử',
-            enabled: _trips.isNotEmpty,
+            enabled: _stats.tripCount > 0 || _trips.isNotEmpty,
             onSelected: (action) {
               if (action == 'clear') _clear();
             },
@@ -244,47 +350,28 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
         ],
       ),
       body: _loading ? const Center(child: CircularProgressIndicator())
-        : RefreshIndicator(onRefresh: _load,
-          child: ListView(
+        : RefreshIndicator(
+          onRefresh: _load,
+          child: ListView.builder(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(14, 13, 14, 22),
-            children: [
-              _periodPicker(),
-              const SizedBox(height: 11),
-              Row(children: [
-                Expanded(child: _statCard(Icons.attach_money,
-                  const Color(0xFF28CB60),
-                  _cash(report.totalFare), 'Tổng doanh thu')),
-                const SizedBox(width: 10),
-                Expanded(child: _statCard(Icons.local_taxi,
-                  const Color(0xFF168FFF),
-                  report.tripCount.toString(), 'Tổng số chuyến')),
-              ]),
-              const SizedBox(height: 8),
-              Row(children: [
-                Expanded(child: _statCard(Icons.map_outlined,
-                  const Color(0xFFFF9731),
-                  report.totalDistanceKm.toStringAsFixed(1) + ' km',
-                  'Tổng quãng đường')),
-                const SizedBox(width: 10),
-                Expanded(child: _statCard(Icons.bar_chart,
-                  const Color(0xFFD13FEC),
-                  _cash(report.averageFare), 'Tiền TB/chuyến')),
-              ]),
-              const SizedBox(height: 12),
-              const Text('Lịch sử chuyến đi',
-                style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 13),
-              if (report.trips.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 40),
-                  child: Center(child: Text('Không có chuyến đi trong kỳ',
-                    style: TextStyle(color: Colors.white60))),
-                )
-              else
-                for (final trip in report.trips) _tripTile(trip),
-              const SizedBox(height: 20),
-            ],
+            itemCount: _trips.length + 2,
+            itemBuilder: (context, index) {
+              if (index == 0) return _reportHeader(_stats);
+              if (index <= _trips.length) return _tripTile(_trips[index - 1]);
+              if (!_hasMore) return const SizedBox(height: 20);
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Center(child: _loadingMore
+                  ? const CircularProgressIndicator(
+                      color: DriverProColors.cyan)
+                  : OutlinedButton.icon(
+                      onPressed: _loadMore,
+                      icon: const Icon(Icons.expand_more_rounded),
+                      label: const Text('Tải thêm chuyến đi'),
+                    )),
+              );
+            },
           ),
         ),
       bottomNavigationBar: SafeArea(top: false, child: NavigationBar(
