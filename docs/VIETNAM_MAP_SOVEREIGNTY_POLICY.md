@@ -20,6 +20,20 @@
 5. `python3 tool/check_map_sovereignty.py` **luôn chạy trước Flutter tests trong GitHub Actions**, kiểm tra không có đường URL tile/style mới đi vòng qua chính sách.
 6. `python3 tool/check_map_sovereignty.py --publish` là cổng **fail-closed** trước khi phát hành bản đồ/hình ảnh hoặc cung cấp dịch vụ ra bên ngoài. Chạy riêng để xác định các phần chưa có bằng chứng kiểm định.
 
+## Chặn hiển thị dữ liệu nền biển đảo chưa kiểm định (0.9.24+44)
+
+Bản 0.9.23 chỉ **đặt thêm nhãn tiếng Việt** lên OpenStreetMap/OpenFreeMap; dữ liệu gốc vẫn có thể chứa nhãn và ranh giới sai với chính sách ứng dụng. Đây là nguyên nhân cần xử lý.
+
+Bản **0.9.24+44** bổ sung lớp **che hiển thị, không phải địa giới hành chính hay đường lãnh hải** cho các khu vực biển ngoài khơi liên quan Hoàng Sa, Trường Sa và Biển Đông:
+
+- FlutterMap 2D và bản đồ hóa đơn/lịch sử: dùng `PolygonLayer` màu biển **không có viền** đặt trên ảnh raster OSM và dưới tuyến GPS, marker tên tiếng Việt.
+- MapLibre 3D: thêm `ttx-offshore-redaction-fill` (GeoJSON vùng che, `fillOpacity: 1.0`) **phía trên** style vector OpenFreeMap, **phía dưới** nhãn tiếng Việt và tuyến GPS; sau mỗi lần tải lại style phải tạo lại lớp che.
+- Nếu lớp bảo vệ của MapLibre không hoàn thành, 3D/Vector hiển thị lớp thông báo màu tối **che toàn bộ nền**. Không coi chỉ có nhãn là đủ an toàn.
+- Mọi khu vực che chỉ là **vùng giới hạn hiển thị tạm thời**, không phải khẳng định biên giới hay vị trí đảo. Chi tiết địa hình và bản đồ biển trong các vùng này cũng bị ẩn cho đến khi có nguồn đã kiểm định.
+- Các tuyến đường bộ ở khu vực đất liền vẫn dùng nền thông thường; tuyến GPS và tính cước không bị thay đổi. Test bắt buộc xác nhận các điểm GPS ở Hà Nội, Đà Nẵng, TP.HCM nằm ngoài vùng che.
+
+Bộ kiểm tra nguồn trong CI yêu cầu cả ba màn hình có lớp che trên tile và khớp chính sách; các bài test kiểm tra vùng che dạng GeoJSON khép kín, nhãn nằm trong phạm vi và không có đường viền ranh giới giả. **Không tuyên bố bản đồ đã đúng hoàn toàn**: vùng bên ngoài lớp che và tile động của bên thứ ba vẫn chưa có chứng nhận. Cổng `--publish` tiếp tục chặn cho đến khi được kiểm tra ảnh/địa giới thực tế.
+
 ## Giới hạn thực tế và điều kiện để công bố đạt
 
 App hiện sử dụng OSM raster từ `tile.openstreetmap.org` và OpenFreeMap vector Dark/Liberty. Các ảnh raster là pixel đã vẽ sẵn; một lớp nhãn Flutter không thể xóa ranh giới hoặc nhãn tranh chấp bên trong ảnh. Tương tự, symbol lớp trên MapLibre không bảo đảm loại bỏ mọi hình học hoặc tên của tile vector bên dưới. Vì vậy **chưa xác nhận các nhà cung cấp này đáp ứng chính sách cho toàn bộ tile và mức zoom**.
