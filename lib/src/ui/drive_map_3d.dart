@@ -72,6 +72,7 @@ class DriveMap3DState extends State<DriveMap3D> {
   bool _followCar = true;
   final RoadQueryGate _roadQueryGate = RoadQueryGate();
   final MapStyleEpoch _styleEpoch = MapStyleEpoch();
+  bool _maritimeProtectionReady = false;
   bool _roadQueryBusy = false;
 
   bool _styleActive(gl.MapLibreMapController controller, int epoch) =>
@@ -122,6 +123,7 @@ class DriveMap3DState extends State<DriveMap3D> {
   void didUpdateWidget(covariant DriveMap3D oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.dark != widget.dark) {
+      _maritimeProtectionReady = false;
       _styleEpoch.invalidate();
       _routeRenderTimer?.cancel();
       _routeRenderTimer = null;
@@ -531,15 +533,34 @@ class DriveMap3DState extends State<DriveMap3D> {
   /// Adds reviewed, localized map labels on top of the base vector map.
   /// No territorial boundary geometry is created. This does not certify
   /// third-party vector features or boundaries beneath the overlay.
-  Future<void> _installVietnamLabels(
+  Future<bool> _installVietnamLabels(
       gl.MapLibreMapController controller, int epoch) async {
-    if (!_styleActive(controller, epoch)) return;
+    if (!_styleActive(controller, epoch)) return false;
     try {
+      // The opaque fill layer sits ABOVE the external vector style and BELOW
+      // the localized names / GPS route. It redacts source imagery rather
+      // than pretending to define any territorial boundaries.
+      await controller.addGeoJsonSource(
+        'ttx-offshore-redactions',
+        VietnamMapSovereignty.geoJsonMaritimeRedactions(),
+      );
+      if (!_styleActive(controller, epoch)) return false;
+      await controller.addFillLayer(
+        'ttx-offshore-redactions',
+        'ttx-offshore-redaction-fill',
+        gl.FillLayerProperties(
+          fillColor: widget.dark ? '#132A42' : '#B7D7E8',
+          fillOpacity: 1.0,
+          fillAntialias: false,
+        ),
+        minzoom: 0, maxzoom: 22,
+      );
+      if (!_styleActive(controller, epoch)) return false;
       await controller.addGeoJsonSource(
         'ttx-vietnam-maritime-labels',
         VietnamMapSovereignty.geoJsonLabels(),
       );
-      if (!_styleActive(controller, epoch)) return;
+      if (!_styleActive(controller, epoch)) return false;
       await controller.addSymbolLayer(
         'ttx-vietnam-maritime-labels',
         'ttx-vietnam-maritime-label-text',
@@ -558,13 +579,14 @@ class DriveMap3DState extends State<DriveMap3D> {
           textIgnorePlacement: true,
           textPitchAlignment: 'viewport',
         ),
-        minzoom: 3, maxzoom: 11,
+        minzoom: 3, maxzoom: 22,
       );
+      return _styleActive(controller, epoch);
     } catch (error) {
-      // If a map style reload prevents this overlay, the view is not
-      // publishable without independent verification. Do not fabricate
-      // new boundaries or silently rewrite unknown vector features.
-      debugPrint('Vietnam-facing map label overlay unavailable: $error');
+      // Fail CLOSED: an incomplete offshore redaction must not expose the
+      // unreviewed provider map. Keep an opaque safety panel above MapLibre.
+      debugPrint('Vietnam maritime redaction unavailable: $error');
+      return false;
     }
   }
 
@@ -572,6 +594,7 @@ class DriveMap3DState extends State<DriveMap3D> {
     final controller = _map;
     if (controller == null || !mounted) return;
     final epoch = _styleEpoch.begin();
+    _maritimeProtectionReady = false;
     _styleReady = true;
     _routeRenderTimer?.cancel();
     _routeRenderTimer = null;
@@ -614,8 +637,11 @@ class DriveMap3DState extends State<DriveMap3D> {
     if (!_styleActive(controller, epoch)) return;
     await _installReadableRoadLabels(controller, epoch);
     if (!_styleActive(controller, epoch)) return;
-    await _installVietnamLabels(controller, epoch);
+    final protectionReady = await _installVietnamLabels(controller, epoch);
     if (!_styleActive(controller, epoch)) return;
+    if (mounted) {
+      setState(() => _maritimeProtectionReady = protectionReady);
+    }
     try {
       await controller.addGeoJsonSource('ttx-route', _routeGeoJson());
       if (!_styleActive(controller, epoch)) return;
@@ -703,12 +729,29 @@ class DriveMap3DState extends State<DriveMap3D> {
       foregroundLoadColor: widget.dark
           ? const Color(0xFF101A28) : const Color(0xFFEEEAE0),
       onMapCreated: (controller) {
-        if (!identical(_map, controller)) _styleEpoch.invalidate();
+        if (!identical(_map, controller)) {
+          _maritimeProtectionReady = false;
+          _styleEpoch.invalidate();
+        }
         _map = controller;
       },
       onStyleLoadedCallback: () => unawaited(_onStyleLoaded()),
     ),
     ),
+    if (!_maritimeProtectionReady)
+      const Positioned.fill(child: ColoredBox(
+        color: Color(0xFF102438),
+        child: Center(child: Padding(
+          padding: EdgeInsets.all(18),
+          child: Text(
+            'Đang xác minh lớp bảo vệ bản đồ biển đảo. '
+            'Không hiển thị nền chưa được kiểm chứng.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Color(0xFFF4F7FA),
+              fontSize: 13, fontWeight: FontWeight.w700),
+          ),
+        )),
+      )),
     const Positioned(
       bottom: 6, right: 5,
       child: IgnorePointer(child: Text('© OpenStreetMap • OpenFreeMap',
