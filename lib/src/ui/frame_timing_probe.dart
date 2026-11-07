@@ -17,7 +17,9 @@ class FrameTimingProbe {
     if (samples.isEmpty) return 0;
     final sorted = List<double>.of(samples)..sort();
     final index = (sorted.length * 0.95).ceil() - 1;
-    return sorted[index.clamp(0, sorted.length - 1)];
+    final bounded = index < 0 ? 0 :
+        (index >= sorted.length ? sorted.length - 1 : index);
+    return sorted[bounded];
   }
 
   void start() {
