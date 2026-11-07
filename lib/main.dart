@@ -43,6 +43,7 @@ import 'src/ui/tariff_catalog_page.dart';
 import 'src/ui/tariff_settings_dialog.dart';
 import 'src/ui/dashboard_map.dart';
 import 'src/ui/map_presentation_gate.dart';
+import 'src/ui/frame_timing_probe.dart';
 import 'src/ui/led_marquee_title.dart';
 import 'src/ui/driver_pro_design.dart';
 import 'src/ui/dashboard_preferences_dialog.dart';
@@ -137,6 +138,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   // GPS visual revisions never request a rebuild of the fare dashboard.
   final ValueNotifier<int> _mapPresentation = ValueNotifier<int>(0);
   final MapPresentationGate _mapFrameGate = MapPresentationGate();
+  final FrameTimingProbe _frameTimingProbe = FrameTimingProbe();
   bool _exportingBackup = false;
   bool _settingsBackupBusy = false;
   bool _unifiedBackupBusy = false;
@@ -177,6 +179,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _frameTimingProbe.start();
     _initializeData();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_startPreviewGps());
@@ -379,6 +382,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     _ticker?.cancel();
     _meterPresentation.dispose();
     _mapPresentation.dispose();
+    _frameTimingProbe.stop();
     _gps?.cancel();
     _previewGps?.cancel();
     repository.dispose();
@@ -574,8 +578,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     // Diagnostic counters appear only in debug, never in release billing.
     assert(() {
       if (_mapFrameGate.observed % 120 == 0) {
-        debugPrint('TTX_PERF map_frames_requested='
-          '${_mapFrameGate.observed} rendered=${_mapFrameGate.published}');
+        debugPrint('TTX_PERF gps_visual_observed='
+          '${_mapFrameGate.observed} map_revisions=${_mapFrameGate.published}');
       }
       return true;
     }());
