@@ -45,6 +45,8 @@ import 'src/ui/dashboard_map.dart';
 import 'src/ui/map_presentation_gate.dart';
 import 'src/ui/frame_timing_probe.dart';
 import 'src/ui/memory_usage_probe.dart';
+import 'src/ui/performance_monitor.dart';
+import 'src/ui/performance_diagnostics_page.dart';
 import 'src/ui/led_marquee_title.dart';
 import 'src/ui/driver_pro_design.dart';
 import 'src/ui/dashboard_preferences_dialog.dart';
@@ -142,6 +144,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   final FrameTimingProbe _frameTimingProbe = FrameTimingProbe();
   late final MemoryUsageProbe _memoryUsageProbe =
       MemoryUsageProbe(isVisible: () => mounted && _appVisible);
+  late final PerformanceMonitor _performanceMonitor =
+      PerformanceMonitor(isVisible: () => mounted && _appVisible);
   bool _exportingBackup = false;
   bool _settingsBackupBusy = false;
   bool _unifiedBackupBusy = false;
@@ -186,7 +190,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     _memoryUsageProbe.start();
     _initializeData();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(_startPreviewGps());
+      if (!mounted) return;
+      _performanceMonitor.markFirstFrame();
+      unawaited(_startPreviewGps());
     });
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
@@ -371,6 +377,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     } finally {
       _initializing = false;
       startupWatch.stop();
+      _performanceMonitor.markStorageFinished(
+        startupWatch.elapsed, successful: _storageReady);
       // Debug-only diagnostic. No extra I/O or telemetry in release mode.
       assert(() {
         debugPrint('TTX_PERF startup_storage_ready_ms='
@@ -388,6 +396,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     _mapPresentation.dispose();
     _frameTimingProbe.stop();
     _memoryUsageProbe.stop();
+    _performanceMonitor.dispose();
     _gps?.cancel();
     _previewGps?.cancel();
     repository.dispose();
@@ -2594,6 +2603,27 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     unawaited(_persistDashboardSettings(next));
   }
 
+  DiagnosticsRuntime _diagnosticsRuntime() => DiagnosticsRuntime(
+    storageReady: _storageReady,
+    gpsStatus: _gpsStatus,
+    foregroundGpsSubscribed: _gps != null,
+    lastTrustedFix: _trackingPolicy.lastTrustedFixAt,
+    map3D: _is3D,
+    routeCount: _routePoints.length,
+    mapObservations: _mapFrameGate.observed,
+    mapRevisions: _mapFrameGate.published,
+  );
+
+  Future<void> _openPerformanceDiagnostics() async {
+    if (!mounted || !_storageReady || _importBackupBusy) return;
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => PerformanceDiagnosticsPage(
+        monitor: _performanceMonitor,
+        readRuntime: _diagnosticsRuntime,
+      ),
+    ));
+  }
+
   Future<void> _settingsMenu() async {
     if (!mounted || _importBackupBusy) return;
     await Navigator.of(context).push<void>(MaterialPageRoute(
@@ -2658,6 +2688,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         return;
       case 'locationPermission':
         _explainAlwaysLocation();
+        return;
+      case 'performanceDiagnostics':
+        _openPerformanceDiagnostics();
         return;
       case 'dashboardSettings':
         _editDashboardPreferences();
@@ -2952,6 +2985,20 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         ),
       ),
       ), // End Scaffold child of the import-blocking Stack.
+      AnimatedBuilder(
+        animation: _performanceMonitor,
+        builder: (context, _) => _performanceMonitor.overlayEnabled &&
+            !_importBackupBusy && _appVisible
+            ? Positioned(
+                top: MediaQuery.paddingOf(context).top + 64,
+                right: 12,
+                child: Material(
+                  color: Colors.transparent,
+                  child: PerformanceMapHud(monitor: _performanceMonitor),
+                ),
+              )
+            : const SizedBox.shrink(),
+      ),
       if (_importBackupBusy)
         const Positioned.fill(child: Stack(children: [
           ModalBarrier(
