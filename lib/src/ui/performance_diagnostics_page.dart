@@ -54,7 +54,11 @@ class _PerformanceDiagnosticsPageState
   @override
   void initState() {
     super.initState();
-    widget.monitor.setMonitoring(true);
+    // Starting an opt-in monitor notifies the underlying map HUD listener.
+    // Defer that notification until the new route has finished building.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.monitor.setMonitoring(true);
+    });
   }
 
   @override
