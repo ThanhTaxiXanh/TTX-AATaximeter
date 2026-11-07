@@ -9,6 +9,7 @@ import 'follow_camera_gate.dart';
 import 'navigation_camera_filter.dart';
 import 'road_label_style.dart';
 import 'nearest_road_name.dart';
+import 'route_render_geometry.dart';
 
 /// GPS arrow is a native geo-referenced symbol, not a fixed HUD overlay.
 /// Native MapLibre vector map with pitch, heading-up camera and OSM buildings.
@@ -281,12 +282,11 @@ class DriveMap3DState extends State<DriveMap3D> {
   }
 
   Map<String, dynamic> _routeGeoJson() {
-    final bySegment = <int, List<List<double>>>{};
-    for (final point in widget.routePoints) {
-      bySegment.putIfAbsent(point.segment, () => []).add(
-        [point.longitude, point.latitude]);
-    }
-    final valid = bySegment.values.where((points) => points.length >= 2)
+    // Simplification is strictly presentational. Full accepted GPS samples
+    // remain in SQLite, receipts and the authoritative fare engine.
+    final valid = displayRouteSegments(widget.routePoints)
+        .map((segment) => segment.map((point) =>
+            [point.longitude, point.latitude]).toList(growable: false))
         .toList(growable: false);
     return {
       'type': 'FeatureCollection',
