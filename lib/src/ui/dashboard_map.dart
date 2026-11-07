@@ -224,6 +224,23 @@ class _DashboardMapState extends State<DashboardMap> {
     ),
     children: [
       _rasterTileLayer(),
+      // Cover unverified third-party maritime imagery, place names and
+      // border graphics BEFORE drawing app-controlled names / GPS tracks.
+      // These polygons have NO borders and are NOT territorial geometry.
+      fm.PolygonLayer(polygons: [
+        for (final zone in VietnamMapSovereignty.maritimeRedactionZones)
+          fm.Polygon(
+            points: [
+              ll.LatLng(zone.south, zone.west),
+              ll.LatLng(zone.south, zone.east),
+              ll.LatLng(zone.north, zone.east),
+              ll.LatLng(zone.north, zone.west),
+            ],
+            color: widget.dark
+                ? const Color(0xFF132A42) : const Color(0xFFB7D7E8),
+            borderStrokeWidth: 0,
+          ),
+      ]),
       // Explicit Vietnam-facing maritime name anchors. These are labels,
       // not geographic polygons or border claims; externally supplied tile
       // graphics still require independent publication review.
