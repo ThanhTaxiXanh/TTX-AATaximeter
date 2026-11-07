@@ -20,9 +20,13 @@ class FlutterFrameWindow {
   void add({required int vsyncMicros, required double buildMs,
       required double rasterMs}) {
     if (vsyncMicros < 0 || !buildMs.isFinite || !rasterMs.isFinite ||
-        buildMs < 0 || rasterMs < 0) return;
+        buildMs < 0 || rasterMs < 0) {
+      return;
+    }
     if (_vsyncMicros.isNotEmpty &&
-        vsyncMicros <= _vsyncMicros.last) return;
+        vsyncMicros <= _vsyncMicros.last) {
+      return;
+    }
     if (_buildMs.length == capacity) {
       _buildMs.removeAt(0);
       _rasterMs.removeAt(0);
