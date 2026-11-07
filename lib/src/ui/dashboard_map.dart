@@ -62,6 +62,7 @@ class _DashboardMapState extends State<DashboardMap> {
   int _cachedRouteCount = -1;
   TripRoutePoint? _cachedRouteTail;
   List<fm.Polyline> _cachedRouteLines = const [];
+  final RouteRenderGeometryCache _routeGeometry = RouteRenderGeometryCache();
 
   bool get _hasFix {
     final lat = widget.latitude, lon = widget.longitude;
@@ -189,7 +190,7 @@ class _DashboardMapState extends State<DashboardMap> {
     final tail = count == 0 ? null : widget.routePoints.last;
     if (count == _cachedRouteCount &&
         identical(tail, _cachedRouteTail)) return _cachedRouteLines;
-    final segments = displayRouteSegments(widget.routePoints);
+    final segments = _routeGeometry.render(widget.routePoints);
     _cachedRouteLines = segments
         .map((points) => fm.Polyline(
           points: points.map((p) => ll.LatLng(p.latitude, p.longitude))
