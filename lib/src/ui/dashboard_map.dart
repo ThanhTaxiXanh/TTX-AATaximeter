@@ -4,6 +4,7 @@ import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:latlong2/latlong.dart' as ll;
 
 import '../domain/trip_route_point.dart';
+import 'route_render_geometry.dart';
 import 'drive_map_3d.dart';
 import 'follow_camera_gate.dart';
 import 'raster_tile_failover.dart';
@@ -188,14 +189,12 @@ class _DashboardMapState extends State<DashboardMap> {
     final tail = count == 0 ? null : widget.routePoints.last;
     if (count == _cachedRouteCount &&
         identical(tail, _cachedRouteTail)) return _cachedRouteLines;
-    final bySegment = <int, List<ll.LatLng>>{};
-    for (final p in widget.routePoints) {
-      bySegment.putIfAbsent(p.segment, () => []).add(
-        ll.LatLng(p.latitude, p.longitude));
-    }
-    _cachedRouteLines = bySegment.values.where((points) => points.length > 1)
+    final segments = displayRouteSegments(widget.routePoints);
+    _cachedRouteLines = segments
         .map((points) => fm.Polyline(
-          points: points, strokeWidth: 5,
+          points: points.map((p) => ll.LatLng(p.latitude, p.longitude))
+              .toList(growable: false),
+          strokeWidth: 5,
           color: const Color(0xFF08B8F4))).toList(growable: false);
     _cachedRouteCount = count;
     _cachedRouteTail = tail;
