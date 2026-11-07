@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 POLICY = ROOT / "lib/src/ui/vietnam_map_sovereignty.dart"
 TWO_D = ROOT / "lib/src/ui/dashboard_map.dart"
 THREE_D = ROOT / "lib/src/ui/drive_map_3d.dart"
+TRIP_MAP = ROOT / "lib/src/ui/trip_detail_page.dart"
 WORKFLOW = ROOT / ".github/workflows/flutter-debug.yml"
 EVIDENCE = ROOT / "docs/VIETNAM_MAP_PUBLICATION_EVIDENCE.json"
 
@@ -38,7 +39,7 @@ def assert_contains(source: str, term: str, description: str, errors: list[str])
 
 def check_source() -> list[str]:
     errors: list[str] = []
-    for path in (POLICY, TWO_D, THREE_D, WORKFLOW, EVIDENCE):
+    for path in (POLICY, TWO_D, THREE_D, TRIP_MAP, WORKFLOW, EVIDENCE):
         if not path.is_file():
             errors.append(f"Required policy file missing: {path.relative_to(ROOT)}")
     if errors:
@@ -47,6 +48,7 @@ def check_source() -> list[str]:
     policy = POLICY.read_text(encoding="utf-8")
     dashboard = TWO_D.read_text(encoding="utf-8")
     vector = THREE_D.read_text(encoding="utf-8")
+    trip_map = TRIP_MAP.read_text(encoding="utf-8")
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
     for constant, expected in EXPECTED_LABELS.items():
@@ -67,6 +69,9 @@ def check_source() -> list[str]:
                  "VietnamMapSovereignty.geoJsonLabels()",
                  "VietnamMapSovereignty.approvedLabel("):
         assert_contains(vector, term, "MapLibre renderer", errors)
+    for term in ("VietnamMapSovereignty.osmRasterTiles",
+                 "VietnamMapSovereignty.labels", "MarkerLayer("):
+        assert_contains(trip_map, term, "History/receipt map", errors)
     assert_contains(workflow, "python3 tool/check_map_sovereignty.py",
                     "Required CI map sovereignty job", errors)
 
