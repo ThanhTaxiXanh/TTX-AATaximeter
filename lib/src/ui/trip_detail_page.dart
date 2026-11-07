@@ -5,6 +5,7 @@ import 'package:latlong2/latlong.dart';
 import '../domain/trip_record.dart';
 import '../domain/trip_route_point.dart';
 import 'driver_pro_design.dart';
+import 'vietnam_map_sovereignty.dart';
 
 String formatTripDate(DateTime value) {
   final local = value.toLocal();
@@ -96,11 +97,34 @@ class _TripRouteMapState extends State<TripRouteMap> {
           ),
           children: [
             TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              urlTemplate: VietnamMapSovereignty.osmRasterTiles,
               userAgentPackageName: 'vn.thanhtaxixanh.ttx_aataximeter',
             ),
             if (lines.isNotEmpty) PolylineLayer(polylines: lines),
             MarkerLayer(markers: [
+              // App-owned Vietnam-facing island/sea names are displayed
+              // wherever their approximate label anchors enter the viewport.
+              for (final label in VietnamMapSovereignty.labels)
+                Marker(
+                  point: LatLng(label.latitude, label.longitude),
+                  width: 166, height: 34,
+                  child: IgnorePointer(child: Center(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: const Color(0xE6091F33),
+                        borderRadius: BorderRadius.circular(7),
+                        border: Border.all(color: DriverProColors.cyan)),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 5),
+                        child: Text(label.name,
+                          style: const TextStyle(
+                            fontSize: 11, color: Colors.white,
+                            fontWeight: FontWeight.w800)),
+                      ),
+                    ),
+                  )),
+                ),
               Marker(
                 point: coordinates.first, width: 44, height: 44,
                 child: const CircleAvatar(
