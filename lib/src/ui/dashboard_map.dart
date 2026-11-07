@@ -9,6 +9,7 @@ import 'drive_map_3d.dart';
 import 'follow_camera_gate.dart';
 import 'raster_tile_failover.dart';
 import 'driver_pro_design.dart';
+import 'vietnam_map_sovereignty.dart';
 
 /// Lightweight OSM 2D map by default; native MapLibre only mounts in 3D.
 class DashboardMap extends StatefulWidget {
@@ -159,7 +160,7 @@ class _DashboardMapState extends State<DashboardMap> {
   Widget _rasterTileLayer() {
     final epoch = _rasterTileEpoch;
     final tiles = fm.TileLayer(
-      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      urlTemplate: VietnamMapSovereignty.osmRasterTiles,
       userAgentPackageName: 'vn.thanhtaxixanh.ttx_aataximeter',
       maxNativeZoom: 19,
       errorTileCallback: (tile, error, stackTrace) =>
@@ -223,6 +224,32 @@ class _DashboardMapState extends State<DashboardMap> {
     ),
     children: [
       _rasterTileLayer(),
+      // Explicit Vietnam-facing maritime name anchors. These are labels,
+      // not geographic polygons or border claims; externally supplied tile
+      // graphics still require independent publication review.
+      fm.MarkerLayer(markers: [
+        for (final label in VietnamMapSovereignty.labels)
+          fm.Marker(
+            point: ll.LatLng(label.latitude, label.longitude),
+            width: 166, height: 34,
+            child: IgnorePointer(child: Center(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: const Color(0xE6091F33),
+                  borderRadius: BorderRadius.circular(7),
+                  border: Border.all(color: DriverProColors.cyan, width: 0.6)),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 7, vertical: 5),
+                  child: Text(label.name,
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white,
+                      fontSize: 11, fontWeight: FontWeight.w800)),
+                ),
+              ),
+            )),
+          ),
+      ]),
       if (routeLines.isNotEmpty) fm.PolylineLayer(polylines: routeLines),
       if (_hasFix) fm.MarkerLayer(markers: [
         fm.Marker(
