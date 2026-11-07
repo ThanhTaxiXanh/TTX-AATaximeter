@@ -12,6 +12,7 @@ import 'nearest_road_name.dart';
 import 'route_render_geometry.dart';
 import 'road_query_gate.dart';
 import 'map_style_epoch.dart';
+import 'vietnam_map_sovereignty.dart';
 
 /// GPS arrow is a native geo-referenced symbol, not a fixed HUD overlay.
 /// Native MapLibre vector map with pitch, heading-up camera and OSM buildings.
@@ -508,9 +509,10 @@ class DriveMap3DState extends State<DriveMap3D> {
       final features = await controller.querySourceFeatures(
         'openmaptiles', 'transportation_name', null);
       if (!_styleActive(controller, epoch)) return;
-      final name = nearestRoadName(features,
-        latitude: latitude, longitude: longitude,
-        bearingDegrees: bearing);
+      final name = VietnamMapSovereignty.approvedLabel(
+        nearestRoadName(features,
+          latitude: latitude, longitude: longitude,
+          bearingDegrees: bearing));
       _roadQueryGate.reportName(name);
       widget.onRoadNameChanged?.call(name);
     } catch (error) {
@@ -571,6 +573,8 @@ class DriveMap3DState extends State<DriveMap3D> {
     }
     if (!_styleActive(controller, epoch)) return;
     await _installReadableRoadLabels(controller, epoch);
+    if (!_styleActive(controller, epoch)) return;
+    await _installVietnamLabels(controller, epoch);
     if (!_styleActive(controller, epoch)) return;
     try {
       await controller.addGeoJsonSource('ttx-route', _routeGeoJson());
@@ -647,8 +651,8 @@ class DriveMap3DState extends State<DriveMap3D> {
       onPointerDown: (_) => _followCar = false,
       child: gl.MapLibreMap(
       styleString: widget.dark
-          ? 'https://tiles.openfreemap.org/styles/dark'
-          : 'https://tiles.openfreemap.org/styles/liberty',
+          ? VietnamMapSovereignty.openFreeMapDark
+          : VietnamMapSovereignty.openFreeMapLiberty,
       initialCameraPosition: _camera(),
       compassEnabled: false,
       logoEnabled: false,
