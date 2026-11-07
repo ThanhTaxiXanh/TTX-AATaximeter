@@ -130,6 +130,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   // sequence. Never advance it before the atomic transaction succeeds.
   int _persistedRouteCount = 0;
   bool _storageReady = false;
+  bool _initializing = false;
+  // Timer-only changes repaint the fare/KPI section, not the native map.
+  final ValueNotifier<int> _meterPresentation = ValueNotifier<int>(0);
   bool _exportingBackup = false;
   bool _settingsBackupBusy = false;
   bool _unifiedBackupBusy = false;
@@ -223,6 +226,13 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   }
 
   Future<void> _initializeData() async {
+    // A failed recovery can be retried without parallel SQLite migrations.
+    if (_initializing || _storageReady) return;
+    _initializing = true;
+    if (_startupError != null && mounted) {
+      setState(() => _startupError = null);
+    }
+    final startupWatch = Stopwatch()..start();
     try {
       // Begin independent preferences reads while SQLite is opening.
       final dashboardFuture = store.getString(
@@ -347,6 +357,15 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       if (!mounted) return;
       setState(() => _startupError = error.toString());
       _notify('Lỗi khởi tạo lịch sử SQLite: ' + error.toString());
+    } finally {
+      _initializing = false;
+      startupWatch.stop();
+      // Debug-only diagnostic. No extra I/O or telemetry in release mode.
+      assert(() {
+        debugPrint('TTX_PERF startup_storage_ready_ms='
+            '${startupWatch.elapsedMilliseconds} success=$_storageReady');
+        return true;
+      }());
     }
   }
 
@@ -354,6 +373,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
+    _meterPresentation.dispose();
     _gps?.cancel();
     _previewGps?.cancel();
     repository.dispose();
@@ -714,13 +734,17 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       meter.skipUntrustedInterval(now);
     }
 
-    // GPS may deliver several fixes in one second, yet the meter clock
-    // advances only on whole seconds. Avoid rebuilding an unchanged view.
+    // A timer-only second changes the displayed fare/KPIs, not the map.
+    // Car Mode still needs its own full-screen display refresh.
     if (_appVisible && mounted &&
         (meter.elapsedSeconds != elapsedBefore ||
          meter.waitingSeconds != waitingBefore ||
          meter.speedKmh != speedBefore || _gpsStatus != gpsStatusBefore)) {
-      setState(() {});
+      if (_carPreview) {
+        setState(() {});
+      } else {
+        _meterPresentation.value++;
+      }
     }
     _checkpoint();
   }
@@ -2613,7 +2637,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           IconButton(
             icon: const Icon(Icons.settings_outlined, size: 25),
             tooltip: 'Mở trung tâm cài đặt',
-            onPressed: _settingsMenu,
+            onPressed: _storageReady ? _settingsMenu : null,
           ),
           const SizedBox(width: 6),
         ],
@@ -2623,9 +2647,14 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         physics: const BouncingScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(11, 6, 11, 20),
         children: [
-          Center(child: DriverProStatusBanner(
-            status: status,
-            requiresManualResume: meter.requiresManualResume)),
+          if (_storageReady)
+            Center(child: DriverProStatusBanner(
+              status: status,
+              requiresManualResume: meter.requiresManualResume))
+          else
+            const Center(child: Text('ĐANG KIỂM TRA DỮ LIỆU CHUYẾN',
+              style: TextStyle(color: DriverProColors.amber,
+                fontSize: 12, fontWeight: FontWeight.w800))),
           if (_interruptedImportWarning != null)
             Padding(
               padding: const EdgeInsets.only(top: 8, bottom: 6),
@@ -2652,62 +2681,99 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                   ? _dashboardPrefs.thanks : _dashboardPrefs.welcome),
           )),
           const SizedBox(height: 8),
-          if (!_storageReady)
-            DriverProPanel(
-              child: SizedBox(
-                height: mapHeight - 24,
-                child: Center(child: _startupError == null
-                    ? const Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          CircularProgressIndicator(
-                            color: DriverProColors.cyan),
-                          SizedBox(height: 12),
-                          Text('Đang tải dữ liệu chuyến đi...'),
+          // Render the lightweight 2D map on the very first frame while
+          // SQLite and saved tariffs are being restored. This is VISUAL
+          // only: all map controls and fare actions remain locked until
+          // _storageReady, so a prior active trip cannot be overwritten.
+          Container(
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: const Color(0xFF17577B), width: 1.3),
+              borderRadius: BorderRadius.circular(19),
+              boxShadow: const [BoxShadow(
+                color: Color(0x2700C9EF), blurRadius: 15)]),
+            child: Stack(children: [
+              AbsorbPointer(
+                absorbing: !_storageReady,
+                child: DashboardMap(
+                  height: mapHeight,
+                  latitude: _mapLat, longitude: _mapLon,
+                  routePoints: active ? _routePoints : const [],
+                  speedKmh: active ? meter.speedKmh : _previewSpeedKmh,
+                  speedLimitKmh: meter.tariff.speedLimitKmh,
+                  headingDegrees: _headingDegrees,
+                  pitchDegrees: _dashboardPrefs.renderedPitch,
+                  is3D: _storageReady && _is3D,
+                  dark: _dashboardPrefs.darkMap,
+                  showCurrentRoadName: _dashboardPrefs.showCurrentRoadName,
+                  onToggle3D: _toggleMap3D,
+                  onToggleDark: _toggleMapDark,
+                  onLocate: _locateOnMap,
+                ),
+              ),
+              if (!_storageReady)
+                Positioned(
+                  left: 12, right: 12, bottom: 12,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: const Color(0xF006101F),
+                      border: Border.all(color: DriverProColors.border),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 9),
+                      child: Row(children: [
+                        if (_startupError == null) ...[
+                          const SizedBox(
+                            height: 18, width: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: DriverProColors.cyan)),
+                          const SizedBox(width: 10),
+                        ] else ...[
+                          const Icon(Icons.warning_amber_rounded,
+                            color: DriverProColors.amber, size: 20),
+                          const SizedBox(width: 8),
                         ],
-                      )
-                    : Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Text('Không tải được dữ liệu chuyến đi'),
+                        Expanded(child: Text(
+                          _startupError == null
+                              ? 'Đang phục hồi chuyến và bảng giá...'
+                              : 'Không tải được dữ liệu chuyến đi',
+                          maxLines: 2, overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 12),
+                        )),
+                        if (_startupError != null)
                           TextButton(
-                            onPressed: _initializeData,
-                            child: const Text('Thử lại')),
-                        ],
-                      )),
-              ),
-            )
-          else
-            Container(
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: const Color(0xFF17577B), width: 1.3),
-                borderRadius: BorderRadius.circular(19),
-                boxShadow: const [BoxShadow(
-                  color: Color(0x2700C9EF), blurRadius: 15)]),
-              child: DashboardMap(
-                height: mapHeight,
-                latitude: _mapLat, longitude: _mapLon,
-                routePoints: active ? _routePoints : const [],
-                speedKmh: active ? meter.speedKmh : _previewSpeedKmh,
-                speedLimitKmh: meter.tariff.speedLimitKmh,
-                headingDegrees: _headingDegrees,
-                pitchDegrees: _dashboardPrefs.renderedPitch,
-                is3D: _is3D,
-                dark: _dashboardPrefs.darkMap,
-                showCurrentRoadName: _dashboardPrefs.showCurrentRoadName,
-                onToggle3D: _toggleMap3D,
-                onToggleDark: _toggleMapDark,
-                onLocate: _locateOnMap,
-              ),
-            ),
+                            onPressed: _initializing ? null : _initializeData,
+                            child: const Text('Thử lại'),
+                          ),
+                      ]),
+                    ),
+                  ),
+                ),
+            ]),
+          ),
           const SizedBox(height: 9),
-          if (status == MeterStatus.idle) ...[
+          if (!_storageReady)
+            const DriverProPanel(
+              child: Text('Đang xác minh chuyến trước đó và bảng giá. '
+                'Chức năng tính cước sẽ sẵn sàng khi hoàn tất.',
+                style: TextStyle(fontSize: 12,
+                  color: DriverProColors.muted)),
+            )
+          else if (status == MeterStatus.idle) ...[
             _selectedCompanyCard(status),
             const SizedBox(height: 8),
             DriverProQuoteCard(
               onPressed: _storageReady ? _flatFareDialog : null),
           ] else if (active) ...[
+            ValueListenableBuilder<int>(
+              valueListenable: _meterPresentation,
+              builder: (context, revision, child) => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
             _mainFareCard(),
             const SizedBox(height: 8),
             _tripMetrics(status),
@@ -2740,6 +2806,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
                     surcharge: meter.surcharge,
                     discount: meter.discount,
                   ),
+                ],
+              ),
+            ),
                 ],
               ),
             ),
@@ -2806,6 +2875,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
           indicatorColor: const Color(0xFF123A53),
           selectedIndex: 0,
           onDestinationSelected: (index) {
+            if (!_storageReady) return;
             if (index == 1) _showHistory();
           },
           destinations: const [
