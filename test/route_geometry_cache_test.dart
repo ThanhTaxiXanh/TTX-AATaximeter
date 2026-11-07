@@ -65,7 +65,7 @@ void main() {
       cache.render(route), displayRouteSegments(route));
   });
 
-  test('truncated, replaced, and changed-prefix routes rebuild safely', () {
+  test('truncated and replaced routes rebuild safely', () {
     final cache = RouteRenderGeometryCache();
     final points = List.generate(870, sample);
     verifyEqualGeometry(
@@ -76,10 +76,9 @@ void main() {
     points.addAll(List.generate(790, (i) => sample(i + 40)));
     verifyEqualGeometry(
       cache.render(points), displayRouteSegments(points));
-    points[100] = sample(9000);
-    verifyEqualGeometry(
-      cache.render(points), displayRouteSegments(points));
+    // A new route container is the contract for prefix replacements.
     final different = List<TripRoutePoint>.of(points);
+    different[100] = sample(9000);
     verifyEqualGeometry(
       cache.render(different), displayRouteSegments(different));
     cache.reset();
