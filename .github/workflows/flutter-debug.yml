@@ -35,6 +35,13 @@ jobs:
         run: python3 tool/bootstrap_android.py
       - name: Resolve dependencies
         run: flutter pub get
+      # Required on EVERY source change; includes map, tiles, geocoder and
+      # screenshot plumbing. Public distribution separately requires
+      # `python3 tool/check_map_sovereignty.py --publish` with evidence.
+      - name: Vietnam map sovereignty source gate (mandatory)
+        run: |
+          python3 tool/check_map_sovereignty.py
+          python3 -m unittest discover -s tool -p 'test_map_sovereignty_gate.py'
       - name: Run unit tests
         run: flutter test
       - name: Flutter static analysis
