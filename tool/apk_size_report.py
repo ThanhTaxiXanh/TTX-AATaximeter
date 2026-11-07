@@ -17,6 +17,7 @@ def report(path: Path) -> str:
         raise FileNotFoundError(path)
     categories: dict[str, int] = defaultdict(int)
     native_libs: dict[str, int] = defaultdict(int)
+    native_details: list[tuple[str, int, int]] = []
     with ZipFile(path) as archive:
         for entry in archive.infolist():
             if entry.is_dir():
@@ -29,6 +30,8 @@ def report(path: Path) -> str:
                 parts = name.split("/")
                 if len(parts) > 2:
                     native_libs[parts[1]] += entry.file_size
+                    native_details.append((name, entry.file_size,
+                                           entry.compress_size))
             elif name.startswith("assets/") or "flutter_assets" in name:
                 category = "Flutter assets"
             elif name.endswith(".dex"):
@@ -50,6 +53,12 @@ def report(path: Path) -> str:
         "Native libraries by ABI:",
         *([f"  {abi}: {to_mb(size)}"
             for abi, size in sorted(native_libs.items())] or ["  none"]),
+        "",
+        "Top native libraries (uncompressed; APK storage uses ZIP sizes):",
+        *([f"  {name}: raw={to_mb(raw)}, zip={to_mb(zipped)}"
+            for name, raw, zipped in sorted(
+                native_details, key=lambda x: -x[1])[:12]]
+          or ["  none"]),
     ]
     return "\n".join(lines) + "\n"
 
