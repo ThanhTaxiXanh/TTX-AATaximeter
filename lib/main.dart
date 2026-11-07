@@ -482,9 +482,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
               // Foreground-only preview refreshes the 3D map at 1 Hz.
               // This stream never contributes to meter distance.
               intervalDuration: const Duration(seconds: 1),
-              distanceFilter: 1)
+              distanceFilter: 0)
           : const LocationSettings(
-              accuracy: LocationAccuracy.high, distanceFilter: 1);
+              accuracy: LocationAccuracy.high, distanceFilter: 0);
       _previewGps = Geolocator.getPositionStream(
         locationSettings: settings).listen(
           (p) {
@@ -517,6 +517,19 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
     }
   }
 
+  /// Visual GPS jitter suppression only. Fare calculation sees raw GPS.
+  void _updateMapGpsPosition(Position p) {
+    if (_mapLat != null && _mapLon != null &&
+        p.speed.isFinite && p.speed < 1.5 && p.accuracy <= 35) {
+      final driftMeters = Geolocator.distanceBetween(
+          _mapLat!, _mapLon!, p.latitude, p.longitude);
+      final tolerance = p.accuracy * 1.5 > 10 ? p.accuracy * 1.5 : 10.0;
+      if (driftMeters <= tolerance) return;
+    }
+    _mapLat = p.latitude;
+    _mapLon = p.longitude;
+  }
+
   void _onPreviewFix(Position p, {bool cached = false}) {
     if (!mounted || !_appVisible || _gps != null ||
         (meter.status != MeterStatus.idle &&
@@ -531,8 +544,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         ? const Duration(seconds: 45)
         : const Duration(seconds: 20))) return;
     setState(() {
-      _mapLat = p.latitude;
-      _mapLon = p.longitude;
+      _updateMapGpsPosition(p);
       _previewSpeedKmh = p.speed.isFinite && p.speed > 0
           ? (p.speed * 3.6).clamp(0.0, 300.0).toDouble() : 0;
       if (p.heading.isFinite && p.heading >= 0 &&
@@ -731,9 +743,9 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
       final settings = defaultTargetPlatform == TargetPlatform.android
           ? AndroidSettings(
               accuracy: LocationAccuracy.bestForNavigation,
-              distanceFilter: 1,
-              // Request denser fixes; existing trusted-GPS safeguards
-              // still decide whether any point can affect the fare.
+              distanceFilter: 0,
+              // GPS must also update at a stop: no one-metre movement gate
+              // is allowed to starve the watchdog or waiting-time clock.
               intervalDuration: const Duration(seconds: 1),
               foregroundNotificationConfig: const ForegroundNotificationConfig(
                 notificationTitle: 'TTX AATaximeter • Đang tính cước',
@@ -746,7 +758,7 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             )
           : const LocationSettings(
               accuracy: LocationAccuracy.bestForNavigation,
-              distanceFilter: 1,
+              distanceFilter: 0,
             );
       setState(() => _gpsStatus = 'GPS nền: đang chờ vị trí chính xác...');
       _gps = Geolocator.getPositionStream(locationSettings: settings)
@@ -762,7 +774,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         final fix = GpsFix(
           latitude: position.latitude,
           longitude: position.longitude,
-          speedKmh: position.speed * 3.6,
+          speedKmh: position.speed.isFinite && position.speed > 0
+              ? position.speed * 3.6 : 0,
           accuracyMeters: position.accuracy,
           timestamp: position.timestamp,
         );
@@ -804,13 +817,12 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
             _routePoints.add(TripRoutePoint(
               latitude: position.latitude, longitude: position.longitude,
               recordedAt: position.timestamp, accuracyMeters: position.accuracy,
-              speedKmh: position.speed * 3.6, segment: _routeSegment,
+              speedKmh: meter.speedKmh, segment: _routeSegment,
             ));
           }
         }
         _applyVisibleState(() {
-          _mapLat = position.latitude;
-          _mapLon = position.longitude;
+          _updateMapGpsPosition(position);
           if (position.heading.isFinite && position.heading >= 0 &&
               position.heading <= 360 && position.speed > 1.5) {
             _headingDegrees = position.heading;
@@ -843,7 +855,8 @@ class _TaximeterHomeState extends State<TaximeterHome> with WidgetsBindingObserv
         state != AppLifecycleState.paused &&
         state != AppLifecycleState.detached;
     if (state == AppLifecycleState.resumed) {
-      // Refresh once with meter/GPS fixes accumulated while in background.
+      // Reconcile only GPS-verified elapsed time if Dart timers were throttled.
+      _meterTick(DateTime.now());
       if (mounted) setState(() {});
       if (meter.status == MeterStatus.idle ||
           meter.status == MeterStatus.finished) {
