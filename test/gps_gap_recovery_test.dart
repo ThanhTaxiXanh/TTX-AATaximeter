@@ -34,6 +34,8 @@ void main() {
     meter.tick(start.add(const Duration(seconds: 299)));
     meter.skipUntrustedInterval(start.add(const Duration(seconds: 330)));
     expect(meter.elapsedSeconds, 299);
+    // The watchdog keeps skipping through the actual recovery instant.
+    meter.skipUntrustedInterval(start.add(const Duration(seconds: 331)));
     expect(meter.acceptGps(fix(start.add(const Duration(seconds: 331)),
         lat: 21.02781)), isTrue);
     meter.tick(start.add(const Duration(seconds: 333)));
