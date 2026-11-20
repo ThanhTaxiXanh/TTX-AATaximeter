@@ -10,6 +10,7 @@ import 'follow_camera_gate.dart';
 import 'raster_tile_failover.dart';
 import 'driver_pro_design.dart';
 import 'vietnam_map_sovereignty.dart';
+import 'map_sovereignty_hud.dart';
 import '../traffic_signs/domain/traffic_sign.dart';
 import '../traffic_signs/presentation/traffic_sign_map_2d.dart';
 
@@ -437,6 +438,15 @@ class _DashboardMapState extends State<DashboardMap> {
                 : null,
             )
           : _twoD(),
+        ),
+        // Always-visible app-owned labels; geographic anchors stay in
+        // Flutter Map/MapLibre and remain independent of this HUD.
+        const Positioned(
+          left: 8, right: 60, top: 46,
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: MapSovereigntyHud(),
+          ),
         ),
         Positioned(top: 8, left: 8,
           child: DecoratedBox(
