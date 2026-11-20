@@ -23,3 +23,36 @@ enum Map2DBaseSource {
       'Chỉ GPS và biển báo · không có bản đồ nền',
   };
 }
+
+
+/// Single-use permission to fall back from an automatically selected
+/// network vector style to the local sign-only canvas.
+///
+/// Timekeeping is owned by the map widget, not this class. A stale timeout
+/// must never override a recovered style or a manual map-source selection.
+class VectorStyleRecoveryGate {
+  int _epoch = 0;
+  int? _pending;
+
+  int arm() {
+    final ticket = ++_epoch;
+    _pending = ticket;
+    return ticket;
+  }
+
+  bool get pending => _pending != null;
+
+  /// Returns true at most once for the current unresolved style attempt.
+  bool consumeTimeout(int ticket) {
+    if (_pending != ticket) return false;
+    _pending = null;
+    ++_epoch;
+    return true;
+  }
+
+  /// Called after a protected style loads OR on any manual/mode change.
+  void cancel() {
+    _pending = null;
+    ++_epoch;
+  }
+}
