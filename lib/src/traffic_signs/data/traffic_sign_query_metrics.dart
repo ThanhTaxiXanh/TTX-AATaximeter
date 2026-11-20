@@ -20,7 +20,7 @@ class TrafficSignQueryMetrics {
       return;
     }
     if (_microseconds.length == capacity) _microseconds.removeAt(0);
-    _microseconds.add(elapsed.inMicroseconds.clamp(0, 0x7fffffff));
+    _microseconds.add(elapsed.inMicroseconds.clamp(0, 0x7fffffff).toInt());
   }
 
   double? get p50Ms => _percentileMs(0.50);
@@ -30,7 +30,7 @@ class TrafficSignQueryMetrics {
     if (_microseconds.isEmpty) return null;
     final ordered = List<int>.of(_microseconds)..sort();
     final index = ((ordered.length * percentile).ceil() - 1)
-        .clamp(0, ordered.length - 1);
+        .clamp(0, ordered.length - 1).toInt();
     return ordered[index] / 1000.0;
   }
 
