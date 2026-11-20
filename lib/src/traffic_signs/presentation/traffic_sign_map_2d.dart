@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -236,6 +238,55 @@ class TrafficSignMap2DState extends State<TrafficSignMap2D> {
                             : 'Trong vùng bản đồ: ${_visible.total} biển báo',
                         style: const TextStyle(color: Colors.white70),
                       ),
+                      if (repository == null && !_loading)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          child: FilledButton.icon(
+                            icon: const Icon(Icons.file_open_outlined),
+                            label: const Text('Nhập SQLite offline từ điện thoại'),
+                            onPressed: () async {
+                              try {
+                                final picked = await FilePicker.platform.pickFiles(
+                                  type: FileType.any,
+                                  withData: false,
+                                  allowMultiple: false,
+                                );
+                                if (picked == null) return;
+                                final filePath = picked.files.single.path;
+                                if (filePath == null) {
+                                  throw StateError(
+                                    'Không đọc được đường dẫn tệp đã chọn');
+                                }
+                                final installed =
+                                    await TrafficSignDatabase.installFromFile(
+                                        File(filePath));
+                                if (!mounted) {
+                                  await installed.database.close();
+                                  return;
+                                }
+                                setState(() {
+                                  _repository = installed;
+                                  _error = null;
+                                });
+                                unawaited(_setFilter(
+                                    _filter.copyWith(enabled: true)));
+                                if (sheetContext.mounted) {
+                                  Navigator.of(sheetContext).pop();
+                                }
+                                ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                                  const SnackBar(content: Text(
+                                    'Đã xác minh và cài database 151.228 biển báo'
+                                  )),
+                                );
+                              } catch (error) {
+                                if (mounted) {
+                                  setState(() => _error = error.toString());
+                                }
+                                if (sheetContext.mounted) rebuild(() {});
+                              }
+                            },
+                          ),
+                        ),
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
                         title: const Text('Hiển thị biển báo'),
