@@ -20,9 +20,15 @@ abstract final class TrafficSignDatabase {
   static const speedSourceSha =
       '77142d75a7f03cd3ada06804743e55ed49c5ab3ceb0e8dca0afe95616f481dc7';
 
-  /// Returns null when no *real* bundled dataset exists. Never creates a
-  /// placeholder traffic sign or modifies the independent trip database.
-  static Future<TrafficSignRepository?> openOptional() async {
+  // Share the immutable database across 2D/3D map remounts instead of
+  // repeatedly copying assets or running a 21 MB SQLite quick_check.
+  static Future<TrafficSignRepository?>? _opened;
+
+  static Future<TrafficSignRepository?> openOptional() =>
+      _opened ??= _openOnce();
+
+  /// Returns null when no verified bundled/previously imported dataset exists.
+  static Future<TrafficSignRepository?> _openOnce() async {
     final root = await getApplicationSupportDirectory();
     final folder = Directory(path.join(root.path, 'traffic_signs'));
     await folder.create(recursive: true);
@@ -114,7 +120,9 @@ abstract final class TrafficSignDatabase {
       await temporary.rename(target.path);
       await marker.writeAsString(expectedSha256, flush: true);
       final database = await openDatabase(target.path, readOnly: true);
-      return TrafficSignRepository(database);
+      final repository = TrafficSignRepository(database);
+      _opened = Future.value(repository);
+      return repository;
     } finally {
       if (await temporary.exists()) await temporary.delete();
     }
