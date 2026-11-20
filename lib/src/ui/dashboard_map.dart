@@ -33,11 +33,14 @@ class DashboardMap extends StatefulWidget {
     required this.showCurrentRoadName,
     this.routePoints = const [],
     this.height = 335,
+    this.initial2DBaseSource = Map2DBaseSource.raster,
   });
   final double? latitude, longitude;
   final double speedKmh, speedLimitKmh, headingDegrees, pitchDegrees;
   final bool is3D, dark, showCurrentRoadName;
   final double height;
+  /// Optional initial reference-only canvas, useful when starting offline.
+  final Map2DBaseSource initial2DBaseSource;
   final VoidCallback onLocate, onToggle3D, onToggleDark;
   final List<TripRoutePoint> routePoints;
 
@@ -63,7 +66,7 @@ class _DashboardMapState extends State<DashboardMap> {
   final FollowCameraGate _twoDFollowGate =
       FollowCameraGate(minimumDistanceMeters: 3.0);
   final RasterTileFailover _tileFailover = RasterTileFailover();
-  Map2DBaseSource _map2DSource = Map2DBaseSource.raster;
+  late Map2DBaseSource _map2DSource;
   String? _currentRoadName;
   int _rasterTileEpoch = 0;
   // Route points are append-only within a trip. Rebuild polyline geometries
@@ -72,6 +75,12 @@ class _DashboardMapState extends State<DashboardMap> {
   TripRoutePoint? _cachedRouteTail;
   List<fm.Polyline> _cachedRouteLines = const [];
   final RouteRenderGeometryCache _routeGeometry = RouteRenderGeometryCache();
+
+  @override
+  void initState() {
+    super.initState();
+    _map2DSource = widget.initial2DBaseSource;
+  }
 
   bool get _hasFix {
     final lat = widget.latitude, lon = widget.longitude;
