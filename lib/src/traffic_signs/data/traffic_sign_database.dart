@@ -79,6 +79,47 @@ abstract final class TrafficSignDatabase {
     }
   }
 
+  /// Import the owner-verified database selected in Android's file picker.
+  /// Never writes to the separate taxi trip database or parses fake signs.
+  static Future<TrafficSignRepository> installFromFile(File source) async {
+    if (!await source.exists() || await source.length() != 21090304) {
+      throw StateError('Tệp không khớp dung lượng database biển báo');
+    }
+    final root = await getApplicationSupportDirectory();
+    final folder = Directory(path.join(root.path, 'traffic_signs'));
+    await folder.create(recursive: true);
+    final target = File(path.join(folder.path, 'traffic_signs_v1.sqlite'));
+    final marker = File('${target.path}.sha256');
+    final temporary = File('${target.path}.importing');
+    try {
+      if (await temporary.exists()) await temporary.delete();
+      await source.copy(temporary.path);
+      final digest = await sha256.bind(temporary.openRead()).first;
+      if (digest.toString() != expectedSha256) {
+        throw StateError('SHA-256 không khớp database biển báo đã duyệt');
+      }
+      final candidate = await openDatabase(temporary.path, readOnly: true);
+      try {
+        await _verifyMetadata(candidate);
+      } finally {
+        await candidate.close();
+      }
+      // Only the dedicated disposable sign cache can be replaced.
+      // A valid prior installation is not overwritten by the UI.
+      if (await target.exists() && await marker.exists() &&
+          (await marker.readAsString()).trim() == expectedSha256) {
+        throw StateError('Database biển báo đã được cài đặt');
+      }
+      if (await target.exists()) await target.delete();
+      await temporary.rename(target.path);
+      await marker.writeAsString(expectedSha256, flush: true);
+      final database = await openDatabase(target.path, readOnly: true);
+      return TrafficSignRepository(database);
+    } finally {
+      if (await temporary.exists()) await temporary.delete();
+    }
+  }
+
   static Future<void> _verifyMetadata(Database db) async {
     final rows = await db.query('metadata');
     final values = <String, String>{
