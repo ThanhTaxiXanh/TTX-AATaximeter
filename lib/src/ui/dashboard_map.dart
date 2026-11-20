@@ -10,6 +10,8 @@ import 'follow_camera_gate.dart';
 import 'raster_tile_failover.dart';
 import 'driver_pro_design.dart';
 import 'vietnam_map_sovereignty.dart';
+import '../traffic_signs/domain/traffic_sign.dart';
+import '../traffic_signs/presentation/traffic_sign_map_2d.dart';
 
 /// Lightweight OSM 2D map by default; native MapLibre only mounts in 3D.
 class DashboardMap extends StatefulWidget {
@@ -43,6 +45,10 @@ class DashboardMap extends StatefulWidget {
 
 class _DashboardMapState extends State<DashboardMap> {
   final fm.MapController _map = fm.MapController();
+  final ValueNotifier<fm.MapCamera?> _signMapCamera =
+      ValueNotifier<fm.MapCamera?>(null);
+  final GlobalKey<TrafficSignMap2DState> _sign2DKey =
+      GlobalKey<TrafficSignMap2DState>();
   final GlobalKey<DriveMap3DState> _driveKey = GlobalKey<DriveMap3DState>();
   // Distinct native map states: switching fallback 2D <-> real 3D must
   // recreate their style layers (including optional building extrusions).
@@ -100,6 +106,19 @@ class _DashboardMapState extends State<DashboardMap> {
         }
       });
     }
+  }
+
+  void _focusOnSign(double latitude, double longitude) {
+    if (!_ready || widget.is3D || _vector2DFallback) return;
+    setState(() => _follow = false);
+    _map.move(ll.LatLng(latitude, longitude), 17);
+  }
+
+  void _zoomToSignCluster(SignMapItem item) {
+    if (!_ready || widget.is3D || _vector2DFallback) return;
+    setState(() => _follow = false);
+    _map.move(ll.LatLng(item.latitude, item.longitude),
+      (_map.camera.zoom + 2).clamp(3.0, 19.0).toDouble());
   }
 
   void _center() {
@@ -183,6 +202,7 @@ class _DashboardMapState extends State<DashboardMap> {
   @override
   void dispose() {
     _map.dispose();
+    _signMapCamera.dispose();
     super.dispose();
   }
 
@@ -214,9 +234,11 @@ class _DashboardMapState extends State<DashboardMap> {
       minZoom: 3, maxZoom: 19,
       onMapReady: () {
         _ready = true;
+        _signMapCamera.value = _map.camera;
         if (_hasFix && _follow) _map.move(_position, 15);
       },
       onPositionChanged: (camera, gesture) {
+        _signMapCamera.value = camera;
         if (gesture && _follow && mounted) {
           setState(() => _follow = false);
         }
@@ -267,6 +289,13 @@ class _DashboardMapState extends State<DashboardMap> {
             )),
           ),
       ]),
+      // Viewport-sized read-only signs, below GPS guidance and vehicle.
+      TrafficSignMap2D(
+        key: _sign2DKey,
+        camera: _signMapCamera,
+        onFocus: _focusOnSign,
+        onCluster: _zoomToSignCluster,
+      ),
       if (routeLines.isNotEmpty) fm.PolylineLayer(polylines: routeLines),
       if (_hasFix) fm.MarkerLayer(markers: [
         fm.Marker(
@@ -446,6 +475,14 @@ class _DashboardMapState extends State<DashboardMap> {
             ),
           ),
         ),
+        if (!widget.is3D && !_vector2DFallback)
+          Positioned(top: 96, left: 8,
+            child: _button(
+              const Icon(Icons.signpost_outlined,
+                color: DriverProColors.cyan, size: 22),
+              () => _sign2DKey.currentState?.showFilters(),
+              'Hiển thị và lọc biển báo offline',
+            )),
         Positioned(right: 7, top: 48,
           child: Column(children: [
             if (!widget.is3D)
