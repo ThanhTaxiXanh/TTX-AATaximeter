@@ -485,14 +485,19 @@ class _DashboardMapState extends State<DashboardMap> {
             ),
           ),
         ),
-        if (!widget.is3D && !_vector2DFallback)
-          Positioned(top: 96, left: 8,
-            child: _button(
-              const Icon(Icons.signpost_outlined,
-                color: DriverProColors.cyan, size: 22),
-              () => _sign2DKey.currentState?.showFilters(),
-              'Hiển thị và lọc biển báo offline',
-            )),
+        Positioned(top: 96, left: 8,
+          child: _button(
+            const Icon(Icons.signpost_outlined,
+              color: DriverProColors.cyan, size: 22),
+            () {
+              if (widget.is3D || _vector2DFallback) {
+                _activeVectorMap?.showSignFilters();
+              } else {
+                _sign2DKey.currentState?.showFilters();
+              }
+            },
+            'Hiển thị và lọc biển báo offline',
+          )),
         Positioned(right: 7, top: 48,
           child: Column(children: [
             if (!widget.is3D)
