@@ -54,8 +54,8 @@ abstract final class TrafficSignDatabase {
         }
         final existing = await openDatabase(target.path, readOnly: true);
         try {
-          await _verifyMetadata(existing);
-          return TrafficSignRepository(existing);
+          final useRtree = await _verifyMetadata(existing);
+          return TrafficSignRepository(existing, useRtree: useRtree);
         } catch (_) {
           await existing.close();
           rethrow;
@@ -86,14 +86,15 @@ abstract final class TrafficSignDatabase {
         throw StateError('Bundled traffic-sign database SHA-256 mismatch');
       }
       final candidate = await openDatabase(temporary.path, readOnly: true);
+      late final bool useRtree;
       try {
-        await _verifyMetadata(candidate);
+        useRtree = await _verifyMetadata(candidate);
       } finally {
         await candidate.close();
       }
       await _promoteChecked(temporary, target, marker);
       final installed = await openDatabase(target.path, readOnly: true);
-      return TrafficSignRepository(installed);
+      return TrafficSignRepository(installed, useRtree: useRtree);
     } finally {
       if (await temporary.exists()) await temporary.delete();
     }
@@ -119,15 +120,17 @@ abstract final class TrafficSignDatabase {
         throw StateError('SHA-256 không khớp database biển báo đã duyệt');
       }
       final candidate = await openDatabase(temporary.path, readOnly: true);
+      late final bool useRtree;
       try {
-        await _verifyMetadata(candidate);
+        useRtree = await _verifyMetadata(candidate);
       } finally {
         await candidate.close();
       }
       // Old cache is never removed until the replacement has passed checks.
       await _promoteChecked(temporary, target, marker);
       final database = await openDatabase(target.path, readOnly: true);
-      final repository = TrafficSignRepository(database);
+      final repository = TrafficSignRepository(
+        database, useRtree: useRtree);
       _opened = Future.value(repository);
       return repository;
     } finally {
@@ -187,7 +190,11 @@ abstract final class TrafficSignDatabase {
     if (await previous.exists()) await previous.delete();
   }
 
-  static Future<void> _verifyMetadata(Database db) async {
+  /// Returns whether the device's SQLite library can query RTree.
+  /// An RTree-unsupported Android SQLite is NOT a corrupt input database.
+  /// Trust is established independently from the exact 21 MB SHA-256
+  /// verified before reaching this method.
+  static Future<bool> _verifyMetadata(Database db) async {
     final rows = await db.query('metadata');
     final values = <String, String>{
       for (final row in rows)
@@ -206,9 +213,34 @@ abstract final class TrafficSignDatabase {
         consistency.first.values.first.toString() != 'ok') {
       throw StateError('Traffic sign database integrity check failed');
     }
-    final rowsExist = await db.rawQuery(
-      'SELECT sign_id FROM traffic_sign_rtree LIMIT 1',
+    // Verify ordinary SQLite tables on *all* devices; these queries do not
+    // require the optional native RTree module.
+    final signRows = await db.rawQuery(
+      'SELECT COUNT(*) AS count FROM traffic_signs',
     );
-    if (rowsExist.isEmpty) throw StateError('Missing spatial index');
+    final shadowRows = await db.rawQuery(
+      'SELECT COUNT(*) AS count FROM traffic_sign_rtree_rowid',
+    );
+    if ((signRows.first['count'] as num).toInt() != 151228 ||
+        (shadowRows.first['count'] as num).toInt() != 151228) {
+      throw StateError('Traffic sign rows/spatial shadow count mismatch');
+    }
+    try {
+      final rowsExist = await db.rawQuery(
+        'SELECT sign_id FROM traffic_sign_rtree LIMIT 1',
+      );
+      if (rowsExist.isEmpty) throw StateError('Missing spatial index');
+      return true;
+    } catch (error) {
+      if (!isRtreeModuleUnavailable(error)) rethrow;
+      debugPrint('SQLite on this Android device has no RTree extension; '
+          'using read-only longitude/latitude scan instead.');
+      return false;
+    }
   }
 }
+
+/// Only this exact optional extension failure activates the query fallback.
+/// Other SQL/schema/corruption errors must not be hidden.
+bool isRtreeModuleUnavailable(Object error) =>
+    error.toString().toLowerCase().contains('no such module: rtree');
