@@ -28,7 +28,10 @@ class TrafficSignLayer extends StatelessWidget {
           child: Semantics(
             label: item.isCluster
                 ? 'Cụm ${item.count} biển báo'
-                : 'Biển báo ${item.signId}, chưa xác minh',
+                : (item.speedKmhInferred == null
+                  ? 'Biển báo ${item.signId}, chưa xác minh'
+                  : 'Biển báo ${item.signId}, tốc độ suy ra '
+                      '${item.speedKmhInferred} km/h, chưa xác minh'),
             button: true,
             child: GestureDetector(
               key: ValueKey('sign-${item.signId}'),
@@ -61,7 +64,7 @@ class TrafficSignLayer extends StatelessWidget {
                             fontSize: 12, fontWeight: FontWeight.bold,
                           ))
                       : (item.speedKmhInferred != null
-                          ? Text('${item.speedKmhInferred}',
+                          ? Text('~${item.speedKmhInferred}',
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 12,
