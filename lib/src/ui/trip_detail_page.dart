@@ -6,6 +6,7 @@ import '../domain/trip_record.dart';
 import '../domain/trip_route_point.dart';
 import 'driver_pro_design.dart';
 import 'vietnam_map_sovereignty.dart';
+import 'map_sovereignty_hud.dart';
 
 String formatTripDate(DateTime value) {
   final local = value.toLocal();
@@ -155,6 +156,15 @@ class _TripRouteMapState extends State<TripRouteMap> {
                   ),
                 ),
             ]),
+            // Persistent labels for history maps even when GPS samples
+            // center the camera far away from the maritime label anchors.
+            const Positioned(
+              top: 8, left: 8, right: 8,
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: MapSovereigntyHud(),
+              ),
+            ),
             const Positioned(
               left: 10, bottom: 7,
               child: Text('© OpenStreetMap contributors',

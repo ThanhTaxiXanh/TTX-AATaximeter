@@ -10,6 +10,7 @@ import 'follow_camera_gate.dart';
 import 'raster_tile_failover.dart';
 import 'driver_pro_design.dart';
 import 'vietnam_map_sovereignty.dart';
+import 'map_sovereignty_hud.dart';
 
 /// Lightweight OSM 2D map by default; native MapLibre only mounts in 3D.
 class DashboardMap extends StatefulWidget {
@@ -408,6 +409,15 @@ class _DashboardMapState extends State<DashboardMap> {
                 : null,
             )
           : _twoD(),
+        ),
+        // Camera-independent map chrome. Geographic labels remain in the
+        // map layers and are shown only when their anchors are in view.
+        const Positioned(
+          left: 8, right: 60, top: 46,
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: MapSovereigntyHud(),
+          ),
         ),
         Positioned(top: 8, left: 8,
           child: DecoratedBox(
