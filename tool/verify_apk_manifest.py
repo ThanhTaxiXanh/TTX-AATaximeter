@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 
-apk = Path("build/app/outputs/flutter-apk/app-debug.apk")
+apk = Path(os.getenv("TTX_APK_PATH", "build/app/outputs/flutter-apk/app-debug.apk"))
 sdk = Path(os.getenv("ANDROID_HOME") or os.getenv("ANDROID_SDK_ROOT") or
            "/usr/local/lib/android/sdk")
 tools = list((sdk / "build-tools").glob("*/aapt"))
