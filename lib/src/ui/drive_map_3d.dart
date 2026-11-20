@@ -4,6 +4,12 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as gl;
+import 'package:shared_preferences/shared_preferences.dart';
+import '../traffic_signs/domain/traffic_sign.dart';
+import '../traffic_signs/data/traffic_sign_database.dart';
+import '../traffic_signs/data/traffic_sign_repository.dart';
+import '../traffic_signs/presentation/traffic_sign_details.dart';
+import '../traffic_signs/presentation/traffic_sign_vector_source.dart';
 import '../domain/trip_route_point.dart';
 import 'follow_camera_gate.dart';
 import 'navigation_camera_filter.dart';
@@ -74,6 +80,129 @@ class DriveMap3DState extends State<DriveMap3D> {
   final MapStyleEpoch _styleEpoch = MapStyleEpoch();
   bool _maritimeProtectionReady = false;
   bool _roadQueryBusy = false;
+
+  // Optional reference data: never attached to taxi fare or GPS listeners.
+  TrafficSignRepository? _signRepository;
+  TrafficSignFilter _signFilter = const TrafficSignFilter();
+  SignViewportResult _signVisible = SignViewportResult.empty;
+  Map<String, SignMapItem> _signDisplayedById = const {};
+  Timer? _signQueryTimer;
+  bool _signLayersReady = false, _signLoading = true;
+  String? _signError;
+  int _signRequestEpoch = 0;
+  SignViewport? _lastSignCoverage;
+  double? _lastSignZoom;
+  bool _signUploadBusy = false;
+  String? _lastTappedSign;
+  DateTime? _lastSignTapAt;
+
+  static const _signPrefsEnabled = 'ttx_signs_layer_enabled_v1';
+  static const _signPrefsSpeed = 'ttx_signs_speed_only_v1';
+  static const _signPrefsCode = 'ttx_signs_type_code_v1';
+
+  late final gl.OnFeatureInteractionCallback _signTapCallback =
+      (point, coordinates, id, layerId, annotation) {
+    if (layerId != TrafficSignVectorSource.circlesId &&
+        layerId != TrafficSignVectorSource.labelsId) return;
+    final item = TrafficSignVectorSource.tapped(id, _signDisplayedById);
+    if (item == null || !_maritimeProtectionReady) return;
+    final now = DateTime.now();
+    if (_lastTappedSign == id && _lastSignTapAt != null &&
+        now.difference(_lastSignTapAt!) <
+            const Duration(milliseconds: 450)) return;
+    _lastTappedSign = id;
+    _lastSignTapAt = now;
+    if (item.isCluster) {
+      _followCar = false;
+      final controller = _map;
+      if (controller != null && _styleReady) {
+        final zoom = (controller.cameraPosition?.zoom ?? 10) + 2;
+        unawaited(controller.animateCamera(
+          gl.CameraUpdate.newCameraPosition(gl.CameraPosition(
+            target: gl.LatLng(item.latitude, item.longitude),
+            zoom: zoom.clamp(3.0, 19.0).toDouble(),
+            tilt: widget.flat2D ? 0 : widget.pitchDegrees,
+          )),
+          duration: const Duration(milliseconds: 280),
+        ).then((_) => _scheduleSignViewport(force: true)));
+      }
+    } else {
+      unawaited(_showSignDetails(item.signId));
+    }
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadTrafficSigns());
+  }
+
+  Future<void> _loadTrafficSigns() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final filter = TrafficSignFilter(
+        enabled: prefs.getBool(_signPrefsEnabled) ?? false,
+        speedOnly: prefs.getBool(_signPrefsSpeed) ?? false,
+        typeCode: prefs.getInt(_signPrefsCode),
+      );
+      final repository = await TrafficSignDatabase.openOptional();
+      if (!mounted) return;
+      setState(() {
+        _signFilter = filter;
+        _signRepository = repository;
+        _signLoading = false;
+      });
+      _scheduleSignViewport(force: true);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _signLoading = false;
+        _signError = error.toString();
+      });
+      debugPrint('MapLibre traffic signs unavailable: $error');
+    }
+  }
+
+  Future<void> _persistSignFilter(TrafficSignFilter filter) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_signPrefsEnabled, filter.enabled);
+      await prefs.setBool(_signPrefsSpeed, filter.speedOnly);
+      if (filter.typeCode == null) {
+        await prefs.remove(_signPrefsCode);
+      } else {
+        await prefs.setInt(_signPrefsCode, filter.typeCode!);
+      }
+    } catch (error) {
+      debugPrint('MapLibre sign preference save failed: $error');
+    }
+  }
+
+  void _setSignFilter(TrafficSignFilter next) {
+    if (!mounted) return;
+    setState(() {
+      _signFilter = next;
+      _signVisible = SignViewportResult.empty;
+    });
+    _signRequestEpoch++;
+    _signQueryTimer?.cancel();
+    _lastSignCoverage = null;
+    // Empty the old native source on toggling filters.
+    final controller = _map;
+    if (controller != null && _signLayersReady &&
+        _styleActive(controller, _styleEpoch.revision)) {
+      unawaited(controller.setGeoJsonSource(
+        TrafficSignVectorSource.sourceId,
+        TrafficSignVectorSource.features(const []),
+      ).catchError((Object error) {
+        debugPrint('Unable to clear vector sign source: $error');
+      }));
+    }
+    _signDisplayedById = const {};
+    unawaited(_persistSignFilter(next));
+    if (next.enabled) _scheduleSignViewport(force: true);
+  }
+
 
   bool _styleActive(gl.MapLibreMapController controller, int epoch) =>
       mounted && _styleReady && identical(_map, controller) &&
