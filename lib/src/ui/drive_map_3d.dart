@@ -4,6 +4,12 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as gl;
+import 'package:shared_preferences/shared_preferences.dart';
+import '../traffic_signs/domain/traffic_sign.dart';
+import '../traffic_signs/data/traffic_sign_database.dart';
+import '../traffic_signs/data/traffic_sign_repository.dart';
+import '../traffic_signs/presentation/traffic_sign_details.dart';
+import '../traffic_signs/presentation/traffic_sign_vector_source.dart';
 import '../domain/trip_route_point.dart';
 import 'follow_camera_gate.dart';
 import 'navigation_camera_filter.dart';
@@ -75,6 +81,120 @@ class DriveMap3DState extends State<DriveMap3D> {
   bool _maritimeProtectionReady = false;
   bool _roadQueryBusy = false;
 
+  // Optional reference data: never attached to taxi fare or GPS listeners.
+  TrafficSignRepository? _signRepository;
+  TrafficSignFilter _signFilter = const TrafficSignFilter();
+  SignViewportResult _signVisible = SignViewportResult.empty;
+  Map<String, SignMapItem> _signDisplayedById = const {};
+  Timer? _signQueryTimer;
+  bool _signLayersReady = false, _signLoading = true;
+  String? _signError;
+  int _signRequestEpoch = 0;
+  SignViewport? _lastSignCoverage;
+  double? _lastSignZoom;
+  bool _signUploadBusy = false;
+  String? _lastTappedSign;
+  DateTime? _lastSignTapAt;
+
+  static const _signPrefsEnabled = 'ttx_signs_layer_enabled_v1';
+  static const _signPrefsSpeed = 'ttx_signs_speed_only_v1';
+  static const _signPrefsCode = 'ttx_signs_type_code_v1';
+
+  late final gl.OnFeatureInteractionCallback _signTapCallback =
+      (point, coordinates, id, layerId, annotation) {
+    if (layerId != TrafficSignVectorSource.circlesId &&
+        layerId != TrafficSignVectorSource.labelsId) return;
+    final item = TrafficSignVectorSource.tapped(id, _signDisplayedById);
+    if (item == null || !_maritimeProtectionReady ||
+        !_signFilter.enabled) return;
+    final now = DateTime.now();
+    if (_lastTappedSign == id && _lastSignTapAt != null &&
+        now.difference(_lastSignTapAt!) <
+            const Duration(milliseconds: 450)) return;
+    _lastTappedSign = id;
+    _lastSignTapAt = now;
+    if (item.isCluster) {
+      _followCar = false;
+      final controller = _map;
+      if (controller != null && _styleReady) {
+        final zoom = (controller.cameraPosition?.zoom ?? 10) + 2;
+        unawaited(controller.animateCamera(
+          gl.CameraUpdate.newCameraPosition(gl.CameraPosition(
+            target: gl.LatLng(item.latitude, item.longitude),
+            zoom: zoom.clamp(3.0, 19.0).toDouble(),
+            tilt: widget.flat2D ? 0 : widget.pitchDegrees,
+          )),
+          duration: const Duration(milliseconds: 280),
+        ).then((_) => _scheduleSignViewport(force: true)));
+      }
+    } else {
+      unawaited(_showSignDetails(item.signId));
+    }
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadTrafficSigns());
+  }
+
+  Future<void> _loadTrafficSigns() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final filter = TrafficSignFilter(
+        enabled: prefs.getBool(_signPrefsEnabled) ?? false,
+        speedOnly: prefs.getBool(_signPrefsSpeed) ?? false,
+        typeCode: prefs.getInt(_signPrefsCode),
+      );
+      final repository = await TrafficSignDatabase.openOptional();
+      if (!mounted) return;
+      setState(() {
+        _signFilter = filter;
+        _signRepository = repository;
+        _signLoading = false;
+      });
+      _scheduleSignViewport(force: true);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _signLoading = false;
+        _signError = error.toString();
+      });
+      debugPrint('MapLibre traffic signs unavailable: $error');
+    }
+  }
+
+  Future<void> _persistSignFilter(TrafficSignFilter filter) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_signPrefsEnabled, filter.enabled);
+      await prefs.setBool(_signPrefsSpeed, filter.speedOnly);
+      if (filter.typeCode == null) {
+        await prefs.remove(_signPrefsCode);
+      } else {
+        await prefs.setInt(_signPrefsCode, filter.typeCode!);
+      }
+    } catch (error) {
+      debugPrint('MapLibre sign preference save failed: $error');
+    }
+  }
+
+  void _setSignFilter(TrafficSignFilter next) {
+    if (!mounted) return;
+    setState(() {
+      _signFilter = next;
+      _signVisible = SignViewportResult.empty;
+    });
+    _signRequestEpoch++;
+    _signQueryTimer?.cancel();
+    _lastSignCoverage = null;
+    _signDisplayedById = const {};
+    unawaited(_persistSignFilter(next));
+    // Serialized native source updates prevent stale markers after toggles.
+    _scheduleSignViewport(force: true);
+  }
+
+
   bool _styleActive(gl.MapLibreMapController controller, int epoch) =>
       mounted && _styleReady && identical(_map, controller) &&
       _styleEpoch.isCurrent(epoch);
@@ -123,6 +243,12 @@ class DriveMap3DState extends State<DriveMap3D> {
   void didUpdateWidget(covariant DriveMap3D oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.dark != widget.dark) {
+      _signQueryTimer?.cancel();
+      _signRequestEpoch++;
+      _signLayersReady = false;
+      _lastSignCoverage = null;
+      _lastSignZoom = null;
+      _signDisplayedById = const {};
       _maritimeProtectionReady = false;
       _styleEpoch.invalidate();
       _routeRenderTimer?.cancel();
@@ -590,10 +716,373 @@ class DriveMap3DState extends State<DriveMap3D> {
     }
   }
 
+
+  Future<void> _installTrafficSignLayers(
+      gl.MapLibreMapController controller, int styleEpoch) async {
+    if (!_styleActive(controller, styleEpoch) ||
+        !_maritimeProtectionReady) return;
+    try {
+      await controller.addGeoJsonSource(
+        TrafficSignVectorSource.sourceId,
+        TrafficSignVectorSource.features(const []),
+      );
+      if (!_styleActive(controller, styleEpoch)) return;
+      await controller.addCircleLayer(
+        TrafficSignVectorSource.sourceId,
+        TrafficSignVectorSource.circlesId,
+        const gl.CircleLayerProperties(
+          circleRadius: ['case', ['>', ['get', 'count'], 1], 22, 19],
+          circleColor: '#143047',
+          circleOpacity: 0.96,
+          circleStrokeColor: '#00C2FF',
+          circleStrokeWidth: 1.6,
+          circlePitchAlignment: 'viewport',
+        ),
+        // Geographic maritime labels must remain above traffic signs.
+        belowLayerId: 'ttx-vietnam-maritime-label-text',
+        minzoom: 3, maxzoom: 22,
+      );
+      if (!_styleActive(controller, styleEpoch)) return;
+      await controller.addSymbolLayer(
+        TrafficSignVectorSource.sourceId,
+        TrafficSignVectorSource.labelsId,
+        const gl.SymbolLayerProperties(
+          textField: ['get', 'display'],
+          textFont: ['Noto Sans Regular'],
+          textSize: 12,
+          textColor: '#FFFFFF',
+          textHaloColor: '#112438',
+          textHaloWidth: 1,
+          textAllowOverlap: true,
+          textIgnorePlacement: true,
+          textPitchAlignment: 'viewport',
+        ),
+        belowLayerId: 'ttx-vietnam-maritime-label-text',
+        minzoom: 3, maxzoom: 22,
+      );
+      if (!_styleActive(controller, styleEpoch)) return;
+      _signLayersReady = true;
+      _scheduleSignViewport(force: true);
+    } catch (error) {
+      _signLayersReady = false;
+      debugPrint('Optional MapLibre sign layer not available: $error');
+      // Sign failure must not fail taxi tracking or the maritime protection.
+    }
+  }
+
+  void _scheduleSignViewport({bool force = false}) {
+    _signQueryTimer?.cancel();
+    final controller = _map;
+    final styleEpoch = _styleEpoch.revision;
+    final requestEpoch = ++_signRequestEpoch;
+    if (controller == null || !_signLayersReady ||
+        !_styleActive(controller, styleEpoch) ||
+        !_maritimeProtectionReady) return;
+    _signQueryTimer = Timer(const Duration(milliseconds: 220), () {
+      unawaited(_querySignViewport(controller, styleEpoch, requestEpoch,
+        force: force));
+    });
+  }
+
+  Future<void> _querySignViewport(
+    gl.MapLibreMapController controller, int styleEpoch,
+    int requestEpoch, {required bool force}
+  ) async {
+    if (!_styleActive(controller, styleEpoch) ||
+        !_signLayersReady || requestEpoch != _signRequestEpoch) return;
+    final repository = _signRepository;
+    if (!_signFilter.enabled || repository == null) {
+      await _publishSignSource(controller, styleEpoch, requestEpoch,
+        SignViewportResult.empty, null, null);
+      return;
+    }
+    try {
+      final region = await controller.getVisibleRegion();
+      if (!_styleActive(controller, styleEpoch) ||
+          requestEpoch != _signRequestEpoch) return;
+      final viewport = SignViewport(
+        west: region.southwest.longitude,
+        south: region.southwest.latitude,
+        east: region.northeast.longitude,
+        north: region.northeast.latitude,
+      );
+      if (!viewport.isValid) {
+        await _publishSignSource(controller, styleEpoch, requestEpoch,
+          SignViewportResult.empty, null, null);
+        return;
+      }
+      final zoom = controller.cameraPosition?.zoom;
+      if (!force && _lastSignCoverage?.contains(viewport) == true &&
+          _lastSignZoom != null && zoom != null &&
+          (zoom - _lastSignZoom!).abs() < 0.8) return;
+      final covered = viewport.expanded();
+      final result = await repository.viewport(covered, _signFilter);
+      if (!_styleActive(controller, styleEpoch) ||
+          requestEpoch != _signRequestEpoch) return;
+      await _publishSignSource(controller, styleEpoch, requestEpoch,
+        result, covered, zoom);
+    } catch (error) {
+      if (_styleActive(controller, styleEpoch) &&
+          requestEpoch == _signRequestEpoch) {
+        _signError = error.toString();
+        debugPrint('MapLibre sign viewport query unavailable: $error');
+      }
+    }
+  }
+
+  bool _signUploadPending = false;
+
+  Future<void> _publishSignSource(
+    gl.MapLibreMapController controller, int styleEpoch,
+    int requestEpoch, SignViewportResult result,
+    SignViewport? covered, double? zoom,
+  ) async {
+    if (_signUploadBusy) {
+      _signUploadPending = true;
+      return;
+    }
+    if (!_styleActive(controller, styleEpoch) ||
+        requestEpoch != _signRequestEpoch || !_signLayersReady) return;
+    _signUploadBusy = true;
+    try {
+      await controller.setGeoJsonSource(
+        TrafficSignVectorSource.sourceId,
+        TrafficSignVectorSource.features(result.items),
+      );
+      if (!_styleActive(controller, styleEpoch) ||
+          requestEpoch != _signRequestEpoch) {
+        _signUploadPending = true;
+        return;
+      }
+      _lastSignCoverage = covered;
+      _lastSignZoom = zoom;
+      _signVisible = result;
+      _signDisplayedById = {
+        for (final item in result.items)
+          TrafficSignVectorSource.featureId(item): item,
+      };
+      _signError = null;
+    } catch (error) {
+      if (_styleActive(controller, styleEpoch)) {
+        _signError = error.toString();
+        debugPrint('Native MapLibre sign source update failed: $error');
+      }
+    } finally {
+      _signUploadBusy = false;
+      if (_signUploadPending && _styleActive(controller, styleEpoch)) {
+        _signUploadPending = false;
+        _scheduleSignViewport(force: true);
+      }
+    }
+  }
+
+  /// Called only by the map's compact Sign control; never opens
+  /// automatically during GPS updates or an active taxi trip.
+  Future<void> showSignFilters() async {
+    final repository = _signRepository;
+    List<int> codes = const [];
+    if (repository != null) {
+      try {
+        codes = await repository.availableTypeCodes();
+      } catch (error) {
+        _signError = error.toString();
+      }
+    }
+    if (!mounted) return;
+    var chosen = _signFilter;
+    final idController = TextEditingController();
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: const Color(0xFF101D2D),
+        isScrollControlled: true,
+        builder: (sheetContext) => StatefulBuilder(
+          builder: (sheetContext, rebuild) {
+            void choose(TrafficSignFilter next) {
+              chosen = next;
+              rebuild(() {});
+              _setSignFilter(next);
+            }
+            return SafeArea(
+              top: false,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(16, 14, 16,
+                  16 + MediaQuery.viewInsetsOf(sheetContext).bottom),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Biển báo trên MapLibre',
+                        style: TextStyle(color: Colors.white,
+                          fontSize: 18, fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 8),
+                      Text(_signLoading
+                          ? 'Đang kiểm tra SQLite offline...'
+                          : _signError != null
+                              ? 'Lỗi dữ liệu: $_signError'
+                              : repository == null
+                                  ? 'Chưa nhập database biển báo thật.'
+                                  : 'Trong vùng: ${_signVisible.total} biển báo',
+                        style: const TextStyle(color: Colors.white70)),
+                      if (repository == null && !_signLoading)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: FilledButton.icon(
+                            icon: const Icon(Icons.file_open_outlined),
+                            label: const Text('Nhập SQLite từ điện thoại'),
+                            onPressed: () async {
+                              try {
+                                final installed =
+                                    await TrafficSignDatabase.pickAndInstall();
+                                if (installed == null || !mounted) return;
+                                setState(() {
+                                  _signRepository = installed;
+                                  _signError = null;
+                                });
+                                _setSignFilter(
+                                  _signFilter.copyWith(enabled: true));
+                                if (sheetContext.mounted) {
+                                  Navigator.of(sheetContext).pop();
+                                }
+                              } catch (error) {
+                                if (!mounted) return;
+                                setState(() => _signError = error.toString());
+                                if (sheetContext.mounted) rebuild(() {});
+                              }
+                            },
+                          ),
+                        ),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Hiển thị biển báo'),
+                        value: repository != null && chosen.enabled,
+                        onChanged: repository == null ? null
+                            : (enabled) => choose(
+                                chosen.copyWith(enabled: enabled)),
+                      ),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Chỉ tốc độ suy ra'),
+                        value: chosen.speedOnly,
+                        onChanged: repository == null ? null
+                            : (speedOnly) => choose(
+                                chosen.copyWith(speedOnly: speedOnly)),
+                      ),
+                      Row(children: [
+                        const Text('Mã loại: '),
+                        DropdownButton<int?>(
+                          value: codes.contains(chosen.typeCode)
+                              ? chosen.typeCode : null,
+                          dropdownColor: const Color(0xFF102438),
+                          items: [
+                            const DropdownMenuItem<int?>(
+                              value: null, child: Text('Tất cả')),
+                            for (final code in codes)
+                              DropdownMenuItem<int?>(
+                                value: code, child: Text('$code')),
+                          ],
+                          onChanged: repository == null ? null
+                              : (code) => choose(chosen.copyWith(
+                                  typeCode: code, clearType: code == null)),
+                        ),
+                      ]),
+                      TextField(
+                        controller: idController,
+                        enabled: repository != null,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: 'Tìm theo sign_id',
+                          border: const OutlineInputBorder(),
+                          suffixIcon: IconButton(
+                            tooltip: 'Tìm biển báo theo ID',
+                            icon: const Icon(Icons.search),
+                            onPressed: repository == null ? null : () async {
+                              final id = int.tryParse(idController.text.trim());
+                              if (id == null) return;
+                              final sign = await repository.byId(id);
+                              if (!mounted || !sheetContext.mounted) return;
+                              Navigator.of(sheetContext).pop();
+                              if (sign == null) {
+                                ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Không tìm thấy biển báo')),
+                                );
+                                return;
+                              }
+                              final controller = _map;
+                              _followCar = false;
+                              if (controller != null && _styleReady) {
+                                await controller.animateCamera(
+                                  gl.CameraUpdate.newCameraPosition(
+                                    gl.CameraPosition(
+                                      target: gl.LatLng(
+                                        sign.latitude, sign.longitude),
+                                      zoom: 17,
+                                      tilt: widget.flat2D
+                                          ? 0 : widget.pitchDegrees,
+                                    ),
+                                  ),
+                                  duration: const Duration(milliseconds: 300),
+                                );
+                              }
+                              _scheduleSignViewport(force: true);
+                              if (mounted) {
+                                unawaited(_showSignDetails(sign.signId));
+                              }
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Dữ liệu chưa xác minh hiệu lực. Tốc độ có dấu ~ là '
+                        'giá trị suy ra, không phải giới hạn pháp lý.',
+                        style: TextStyle(
+                          color: Colors.amberAccent, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      );
+    } finally {
+      idController.dispose();
+    }
+  }
+
+  Future<void> _showSignDetails(int id) async {
+    final repository = _signRepository;
+    if (repository == null) return;
+    try {
+      final sign = await repository.byId(id);
+      if (!mounted) return;
+      if (sign == null) return;
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: const Color(0xFF101D2D),
+        builder: (_) => TrafficSignDetails(sign: sign),
+      );
+    } catch (error) {
+      debugPrint('MapLibre traffic-sign detail unavailable: $error');
+    }
+  }
+
   Future<void> _onStyleLoaded() async {
     final controller = _map;
     if (controller == null || !mounted) return;
     final epoch = _styleEpoch.begin();
+    _signQueryTimer?.cancel();
+    _signRequestEpoch++;
+    _signLayersReady = false;
+    _signDisplayedById = const {};
+    _signVisible = SignViewportResult.empty;
+    _lastSignCoverage = null;
+    _lastSignZoom = null;
     _maritimeProtectionReady = false;
     _styleReady = true;
     _routeRenderTimer?.cancel();
@@ -642,6 +1131,9 @@ class DriveMap3DState extends State<DriveMap3D> {
     if (mounted) {
       setState(() => _maritimeProtectionReady = protectionReady);
     }
+    // Never draw reference signs over an unverified/failed maritime cover.
+    if (protectionReady) await _installTrafficSignLayers(controller, epoch);
+    if (!_styleActive(controller, epoch)) return;
     try {
       await controller.addGeoJsonSource('ttx-route', _routeGeoJson());
       if (!_styleActive(controller, epoch)) return;
@@ -701,6 +1193,9 @@ class DriveMap3DState extends State<DriveMap3D> {
 
   @override
   void dispose() {
+    _signRequestEpoch++;
+    _signQueryTimer?.cancel();
+    _map?.onFeatureTapped.remove(_signTapCallback);
     _styleEpoch.dispose();
     _routeRenderTimer?.cancel();
     _routeRenderTimer = null;
@@ -730,11 +1225,17 @@ class DriveMap3DState extends State<DriveMap3D> {
           ? const Color(0xFF101A28) : const Color(0xFFEEEAE0),
       onMapCreated: (controller) {
         if (!identical(_map, controller)) {
+          _map?.onFeatureTapped.remove(_signTapCallback);
+          controller.onFeatureTapped.add(_signTapCallback);
           _maritimeProtectionReady = false;
+          _signLayersReady = false;
+          _signRequestEpoch++;
           _styleEpoch.invalidate();
         }
         _map = controller;
       },
+      trackCameraPosition: true,
+      onCameraIdle: () => _scheduleSignViewport(),
       onStyleLoadedCallback: () => unawaited(_onStyleLoaded()),
     ),
     ),

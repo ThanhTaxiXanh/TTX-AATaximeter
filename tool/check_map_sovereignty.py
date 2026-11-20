@@ -88,6 +88,14 @@ def check_source() -> list[str]:
                  "VietnamMapSovereignty.geoJsonLabels()",
                  "VietnamMapSovereignty.approvedLabel("):
         assert_contains(vector, term, "MapLibre renderer", errors)
+    # New MapLibre sign overlays may never bypass the opaque maritime
+    # redactions or occlude the app-controlled maritime name symbols.
+    for term in ("if (protectionReady) await _installTrafficSignLayers(",
+                 "belowLayerId: 'ttx-vietnam-maritime-label-text'",
+                 "onCameraIdle: () => _scheduleSignViewport()",
+                 "TrafficSignVectorSource.sourceId"):
+        assert_contains(vector, term, "MapLibre sign overlay safeguards", errors)
+
     for term in ("VietnamMapSovereignty.osmRasterTiles",
                  "VietnamMapSovereignty.labels", "MarkerLayer(",
                  "PolygonLayer(", "maritimeRedactionZones",

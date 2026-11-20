@@ -66,6 +66,25 @@ class SignViewport {
       south.isFinite && north.isFinite &&
       west >= -180 && east <= 180 && west <= east &&
       south >= -90 && north <= 90 && south <= north;
+  
+  /// Pad the visible region to avoid a SQL request on each small GPS move.
+  SignViewport expanded([double fraction = 0.25]) {
+    if (!isValid || !fraction.isFinite || fraction < 0) return this;
+    final dx = (east - west) * fraction;
+    final dy = (north - south) * fraction;
+    return SignViewport(
+      west: (west - dx).clamp(-180.0, 180.0).toDouble(),
+      east: (east + dx).clamp(-180.0, 180.0).toDouble(),
+      south: (south - dy).clamp(-90.0, 90.0).toDouble(),
+      north: (north + dy).clamp(-90.0, 90.0).toDouble(),
+    );
+  }
+
+  bool contains(SignViewport other) =>
+      isValid && other.isValid &&
+      west <= other.west && east >= other.east &&
+      south <= other.south && north >= other.north;
+
 }
 
 /// A single sign or a database-side spatial aggregate.
