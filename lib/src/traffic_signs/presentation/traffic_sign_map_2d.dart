@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -250,14 +252,35 @@ class TrafficSignMap2DState extends State<TrafficSignMap2D> {
                                   type: FileType.any,
                                 );
                                 if (picked == null) return;
-                                final filePath = picked.path;
-                                if (filePath == null) {
+                                final reportedSize =
+                                    picked.lengthSync() ?? await picked.length();
+                                if (reportedSize != null &&
+                                    reportedSize != 21090304) {
                                   throw StateError(
-                                    'Không đọc được đường dẫn tệp đã chọn');
+                                    'Dung lượng tệp không khớp dữ liệu thật');
                                 }
-                                final installed =
-                                    await TrafficSignDatabase.installFromFile(
-                                        File(filePath));
+                                // Android SAF may return a content URI rather
+                                // than a readable filesystem path. Stream to
+                                // a local temp file without allocating 21 MB
+                                // of Dart bytes, then verify its SHA-256.
+                                final temporaryFolder = await getTemporaryDirectory();
+                                final temporary = File(path.join(
+                                  temporaryFolder.path,
+                                  'ttx_sign_import_${DateTime.now().microsecondsSinceEpoch}.sqlite',
+                                ));
+                                late final TrafficSignRepository installed;
+                                try {
+                                  await picked.readAsByteStream().pipe(
+                                    temporary.openWrite(),
+                                  );
+                                  installed =
+                                      await TrafficSignDatabase.installFromFile(
+                                          temporary);
+                                } finally {
+                                  if (await temporary.exists()) {
+                                    await temporary.delete();
+                                  }
+                                }
                                 if (!mounted) {
                                   await installed.database.close();
                                   return;
