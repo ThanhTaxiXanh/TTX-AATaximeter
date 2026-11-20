@@ -72,10 +72,7 @@ class TrafficSignMap2DState extends State<TrafficSignMap2D> {
         typeCode: prefs.getInt(_typeKey),
       );
       final repository = await TrafficSignDatabase.openOptional();
-      if (!mounted) {
-        await repository?.database.close();
-        return;
-      }
+      if (!mounted) return; // Shared database remains available on remount.
       setState(() {
         _filter = filter;
         _repository = repository;
@@ -281,10 +278,7 @@ class TrafficSignMap2DState extends State<TrafficSignMap2D> {
                                     await temporary.delete();
                                   }
                                 }
-                                if (!mounted) {
-                                  await installed.database.close();
-                                  return;
-                                }
+                                if (!mounted) return;
                                 setState(() {
                                   _repository = installed;
                                   _error = null;
@@ -391,8 +385,6 @@ class TrafficSignMap2DState extends State<TrafficSignMap2D> {
     widget.camera.removeListener(_scheduleViewport);
     _queryTimer?.cancel();
     _queryEpoch++;
-    final repository = _repository;
-    if (repository != null) unawaited(repository.database.close());
     super.dispose();
   }
 
