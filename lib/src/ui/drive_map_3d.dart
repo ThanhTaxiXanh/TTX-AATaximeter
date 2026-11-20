@@ -928,6 +928,13 @@ class DriveMap3DState extends State<DriveMap3D> {
                                   ? 'Chưa nhập database biển báo thật.'
                                   : 'Trong vùng: ${_signVisible.total} biển báo',
                         style: const TextStyle(color: Colors.white70)),
+                      if (repository != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4, bottom: 6),
+                          child: Text(repository.queryMetrics.summary,
+                            style: const TextStyle(
+                              color: Colors.white70, fontSize: 11)),
+                        ),
                       if (repository == null && !_signLoading)
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 8),
