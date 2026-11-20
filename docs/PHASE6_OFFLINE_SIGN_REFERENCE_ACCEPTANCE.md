@@ -73,3 +73,30 @@ bản đồ phát hành hay đồng hồ taxi được kiểm định pháp lý.
   xem xét phát hành bên ngoài.
 - Không merge nhánh `main` hoặc phát hành APK thương mại trước khi có
   phê duyệt riêng.
+
+## 5. Tự phục hồi khi đồng thời mất raster và vector
+
+- Bắt đầu ở 2D raster và tắt cả Wi-Fi lẫn dữ liệu di động.
+- Khi có ít nhất 3 lỗi tải raster, ứng dụng sẽ chuyển thử sang
+  OpenFreeMap vector, **vẫn che nền** cho đến khi lớp redaction và
+  nhãn bản đồ ứng dụng sẵn sàng.
+- Nếu style được bảo vệ không tải xong trong **16 giây**, giao diện
+  tự rút về chế độ **Chỉ GPS / Biển báo**. Chế độ này không tải tile nền.
+  Dữ liệu tuyến đường/tính cước vẫn giữ theo GPS gốc.
+- Nếu style được bảo vệ tải thành công trước 16 giây,
+  timeout phải bị hủy và bản đồ vector tiếp tục hoạt động.
+- Nếu người dùng tự đổi nguồn bản đồ hoặc sang 3D,
+  timeout cũ phải bị hủy, không được ghi đè lựa chọn mới.
+- Trong 3D, khi style không tải được phải tiếp tục che kín nền
+  theo TTX-VN-MAP-01; tự phục hồi 3D chưa được hứa hẹn.
+- Kiểm thử này cần thực hiện trên máy thật, không chỉ bằng mock CI.
+
+## 6. Kiểm tra tính toàn vẹn cache biển báo
+
+- Khi mở lại ứng dụng, cache SQLite hợp lệ cần được băm SHA-256 trực tiếp
+  trên **nội dung thực**; không được tin sidecar .sha256 một cách độc lập.
+- Khi nhập file sai SHA-256, app từ chối file và không thay đổi dữ liệu chuyến.
+- Khi cache biển báo bị đổi dù sidecar vẫn đúng, app phải từ chối cache
+  và yêu cầu nhập tệp hợp lệ hoặc khôi phục từ asset được xác minh.
+- Không sửa `ttx_traffic_signs.sqlite` khi muốn thay biển, cũng không
+  tự suy diễn hiệu lực biển báo để tính cước/cảnh báo tốc độ.
