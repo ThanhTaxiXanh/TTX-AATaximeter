@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 
-apk = Path("build/app/outputs/flutter-apk/app-debug.apk")
+apk = Path(os.getenv("TTX_APK_PATH", "build/app/outputs/flutter-apk/app-debug.apk"))
 sdk = Path(os.getenv("ANDROID_HOME") or os.getenv("ANDROID_SDK_ROOT") or
            "/usr/local/lib/android/sdk")
 tools = list((sdk / "build-tools").glob("*/aapt"))
@@ -64,6 +64,26 @@ if "TtxCarAppService" in manifest:
         "Experimental taxi-only CarAppService must not be registered "
         "as an unsupported Android Auto category"
     )
+
+if os.getenv("TTX_QA_BUILD") == "1":
+    from android_qa_identity import QA_ID, QA_LABEL
+
+    badging = subprocess.check_output(
+        [str(aapt), "dump", "badging", str(apk)],
+        text=True, stderr=subprocess.STDOUT,
+    )
+    if f"package: name='{QA_ID}'" not in badging:
+        raise SystemExit(
+            f"QA APK package ID mismatch: expected {QA_ID!r}; "
+            "refusing a potentially production-overwriting APK"
+        )
+    if f"application-label:'{QA_LABEL}'" not in badging:
+        raise SystemExit(
+            f"QA launcher label mismatch: expected {QA_LABEL!r}"
+        )
+    print("QA_PACKAGE_ID_VERIFIED:", QA_ID)
+    print("QA_LAUNCHER_LABEL_VERIFIED:", QA_LABEL)
+
 print("APK_MERGED_MANIFEST_OK")
 print("Confirmed permissions:", ", ".join(required))
 print("Confirmed geolocator service foreground type=location")
