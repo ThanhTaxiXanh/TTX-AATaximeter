@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as path;
@@ -123,6 +124,31 @@ abstract final class TrafficSignDatabase {
       final repository = TrafficSignRepository(database);
       _opened = Future.value(repository);
       return repository;
+    } finally {
+      if (await temporary.exists()) await temporary.delete();
+    }
+  }
+
+  /// Android/iOS file-picker flow. Streams SAF/Files content to a staging
+  /// file, preserving memory, then validates exact owner database SHA-256.
+  /// A cancelled picker does not change the existing database.
+  static Future<TrafficSignRepository?> pickAndInstall() async {
+    final picked = await FilePicker.pickFile(type: FileType.any);
+    if (picked == null) return null;
+    final reportedSize = picked.lengthSync() ?? await picked.length();
+    if (reportedSize != null && reportedSize != 21090304) {
+      throw StateError('Dung lượng tệp không khớp dữ liệu thật');
+    }
+    final tempDirectory = await getTemporaryDirectory();
+    final temporary = File(path.join(
+      tempDirectory.path,
+      'ttx_sign_import_${DateTime.now().microsecondsSinceEpoch}.sqlite',
+    ));
+    try {
+      await picked.readAsByteStream()
+          .cast<List<int>>()
+          .pipe(temporary.openWrite());
+      return await installFromFile(temporary);
     } finally {
       if (await temporary.exists()) await temporary.delete();
     }
