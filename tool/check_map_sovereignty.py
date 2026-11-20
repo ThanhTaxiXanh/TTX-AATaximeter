@@ -78,6 +78,23 @@ def check_source() -> list[str]:
                  "fm.PolygonLayer(", "maritimeRedactionZones",
                  "borderStrokeWidth: 0"):
         assert_contains(dashboard, term, "2D renderer", errors)
+    # Local-only reference mode never fetches OSM raster tiles and must
+    # retain the protected maritime geometry and app-owned name layers.
+    for term in ("if (_map2DSource.fetchesRasterTiles)",
+                 "TrafficSignMap2D(",
+                 "MapSovereigntyHud()",
+                 "CHỈ GPS / BIỂN BÁO · KHÔNG CÓ BẢN ĐỒ NỀN"):
+        assert_contains(dashboard, term, "Offline sign reference screen", errors)
+    source_mode = ROOT / "lib/src/ui/map_base_source_policy.dart"
+    if not source_mode.is_file():
+        errors.append("Missing explicit offline source policy")
+    else:
+        mode_source = source_mode.read_text(encoding="utf-8")
+        for term in ("Map2DBaseSource.offlineSigns",
+                     "Map2DBaseSource.vector", "Map2DBaseSource.raster",
+                     "bool get fetchesRasterTiles"):
+            assert_contains(mode_source, term, "Offline source contract", errors)
+
     for term in ("VietnamMapSovereignty.openFreeMapDark",
                  "VietnamMapSovereignty.openFreeMapLiberty",
                  "geoJsonMaritimeRedactions()",
