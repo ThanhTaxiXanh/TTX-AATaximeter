@@ -100,3 +100,20 @@ bản đồ phát hành hay đồng hồ taxi được kiểm định pháp lý.
   và yêu cầu nhập tệp hợp lệ hoặc khôi phục từ asset được xác minh.
 - Không sửa `ttx_traffic_signs.sqlite` khi muốn thay biển, cũng không
   tự suy diễn hiệu lực biển báo để tính cước/cảnh báo tốc độ.
+
+## 7. Đo thời gian truy vấn SQLite trên điện thoại (không cần chế độ nhà phát triển)
+
+1. Nhập SQLite đã xác minh và bật lớp biển báo trong bản đồ 2D.
+2. Di chuyển bản đồ tại khu vực có nhiều biển (có thể thử toàn quốc,
+   Hà Nội và Bắc Giang), chờ cụm/marker xuất hiện.
+3. Nhấn nút **Biển báo**, ghi lại dòng thống kê
+   `SQLite: N truy vấn · p50 X ms · p95 Y ms`.
+4. Chuyển sang 3D, đổi sáng/tối, tiếp tục di chuyển camera và kiểm tra
+   thống kê trong bộ lọc MapLibre.
+5. Ghi số lỗi truy vấn nếu có, thời gian tải dấu biển, FPS quan sát được
+   và nhiệt độ máy bằng phương pháp kiểm thử thông thường. **p50/p95 ở đây
+   chỉ đo thời gian truy vấn SQLite**; chúng không phải FPS, thời gian
+   toàn bộ render hay độ trễ định vị GPS.
+6. Mẫu thống kê chỉ giữ tối đa 64 kết quả thành công trong RAM, không lưu
+   tọa độ người dùng, dữ liệu chuyến hoặc lịch sử tính cước. Thống kê
+   tự làm mới sau khi ứng dụng được khởi động lại.
