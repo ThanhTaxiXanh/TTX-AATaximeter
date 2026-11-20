@@ -233,6 +233,13 @@ class TrafficSignMap2DState extends State<TrafficSignMap2D> {
                             : 'Trong vùng bản đồ: ${_visible.total} biển báo',
                         style: const TextStyle(color: Colors.white70),
                       ),
+                      if (repository != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4, bottom: 6),
+                          child: Text(repository.queryMetrics.summary,
+                            style: const TextStyle(
+                              color: Colors.white70, fontSize: 11)),
+                        ),
                       if (repository == null && !_loading)
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 10),
