@@ -39,8 +39,12 @@ void main() {
 
     // No TileLayer means zero app-initiated HTTP raster tile requests.
     expect(find.byType(fm.TileLayer), findsNothing);
-    expect(find.text('Hoàng Sa (Việt Nam)'), findsOneWidget);
-    expect(find.text('Trường Sa (Việt Nam)'), findsOneWidget);
+    // Both geographic anchors AND persistent HUD labels can be built.
+    // Assert the fixed HUD itself rather than assuming exactly one Text.
+    expect(find.byKey(const Key('ttx-hud-hoang-sa')), findsOneWidget);
+    expect(find.byKey(const Key('ttx-hud-truong-sa')), findsOneWidget);
+    expect(find.text('Hoàng Sa (Việt Nam)'), findsWidgets);
+    expect(find.text('Trường Sa (Việt Nam)'), findsWidgets);
     expect(find.textContaining('KHÔNG CÓ BẢN ĐỒ NỀN'), findsOneWidget);
     expect(find.text('CHỜ GPS'), findsOneWidget);
     expect(tester.takeException(), isNull);
