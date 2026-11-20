@@ -1,0 +1,48 @@
+name: Offline traffic-sign spatial database checks
+
+on:
+  push:
+    branches: [feature/traffic-sign-spatial-db]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate-signs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate SQLite/RTree builder using explicitly synthetic test fixtures
+        run: python3 -m unittest discover -s tool -p 'test_traffic_sign_db.py' -v
+      - name: Validate and build real owner dataset when BOTH inputs are available
+        shell: bash
+        run: |
+          set -euo pipefail
+          traffic="data/traffic_signs.geojson"
+          speeds="data/speed_limit_signs.geojson"
+          if [[ -f "$traffic" && -f "$speeds" ]]; then
+            mkdir -p build
+            python3 tool/build_traffic_sign_db.py \
+              --traffic "$traffic" \
+              --speed "$speeds" \
+              --output build/traffic_signs.sqlite \
+              --report build/traffic_sign_data_quality.json
+            echo "Production data checksum/row-count validation completed." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ -f "$traffic" || -f "$speeds" ]]; then
+            echo "ERROR: Both input datasets are mandatory." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          else
+            echo "NOT VERIFIED: Production GeoJSON files are not present in this GitHub checkout." >> "$GITHUB_STEP_SUMMARY"
+            echo "Synthetic builder tests only; no real dataset indexed." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: ${{ hashFiles('build/traffic_signs.sqlite') != '' }}
+        with:
+          name: validated-traffic-sign-offline-db
+          path: |
+            build/traffic_signs.sqlite
+            build/traffic_sign_data_quality.json
