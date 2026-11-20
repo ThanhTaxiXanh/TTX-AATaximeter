@@ -872,6 +872,184 @@ class DriveMap3DState extends State<DriveMap3D> {
     }
   }
 
+  /// Called only by the map's compact Sign control; never opens
+  /// automatically during GPS updates or an active taxi trip.
+  Future<void> showSignFilters() async {
+    final repository = _signRepository;
+    List<int> codes = const [];
+    if (repository != null) {
+      try {
+        codes = await repository.availableTypeCodes();
+      } catch (error) {
+        _signError = error.toString();
+      }
+    }
+    if (!mounted) return;
+    var chosen = _signFilter;
+    final idController = TextEditingController();
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: const Color(0xFF101D2D),
+        isScrollControlled: true,
+        builder: (sheetContext) => StatefulBuilder(
+          builder: (sheetContext, rebuild) {
+            void choose(TrafficSignFilter next) {
+              chosen = next;
+              rebuild(() {});
+              _setSignFilter(next);
+            }
+            return SafeArea(
+              top: false,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(16, 14, 16,
+                  16 + MediaQuery.viewInsetsOf(sheetContext).bottom),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Biển báo trên MapLibre',
+                        style: TextStyle(color: Colors.white,
+                          fontSize: 18, fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 8),
+                      Text(_signLoading
+                          ? 'Đang kiểm tra SQLite offline...'
+                          : _signError != null
+                              ? 'Lỗi dữ liệu: $_signError'
+                              : repository == null
+                                  ? 'Chưa nhập database biển báo thật.'
+                                  : 'Trong vùng: ${_signVisible.total} biển báo',
+                        style: const TextStyle(color: Colors.white70)),
+                      if (repository == null && !_signLoading)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: FilledButton.icon(
+                            icon: const Icon(Icons.file_open_outlined),
+                            label: const Text('Nhập SQLite từ điện thoại'),
+                            onPressed: () async {
+                              try {
+                                final installed =
+                                    await TrafficSignDatabase.pickAndInstall();
+                                if (installed == null || !mounted) return;
+                                setState(() {
+                                  _signRepository = installed;
+                                  _signError = null;
+                                });
+                                _setSignFilter(
+                                  _signFilter.copyWith(enabled: true));
+                                if (sheetContext.mounted) {
+                                  Navigator.of(sheetContext).pop();
+                                }
+                              } catch (error) {
+                                if (!mounted) return;
+                                setState(() => _signError = error.toString());
+                                if (sheetContext.mounted) rebuild(() {});
+                              }
+                            },
+                          ),
+                        ),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Hiển thị biển báo'),
+                        value: repository != null && chosen.enabled,
+                        onChanged: repository == null ? null
+                            : (enabled) => choose(
+                                chosen.copyWith(enabled: enabled)),
+                      ),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Chỉ tốc độ suy ra'),
+                        value: chosen.speedOnly,
+                        onChanged: repository == null ? null
+                            : (speedOnly) => choose(
+                                chosen.copyWith(speedOnly: speedOnly)),
+                      ),
+                      Row(children: [
+                        const Text('Mã loại: '),
+                        DropdownButton<int?>(
+                          value: codes.contains(chosen.typeCode)
+                              ? chosen.typeCode : null,
+                          dropdownColor: const Color(0xFF102438),
+                          items: [
+                            const DropdownMenuItem<int?>(
+                              value: null, child: Text('Tất cả')),
+                            for (final code in codes)
+                              DropdownMenuItem<int?>(
+                                value: code, child: Text('$code')),
+                          ],
+                          onChanged: repository == null ? null
+                              : (code) => choose(chosen.copyWith(
+                                  typeCode: code, clearType: code == null)),
+                        ),
+                      ]),
+                      TextField(
+                        controller: idController,
+                        enabled: repository != null,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: 'Tìm theo sign_id',
+                          border: const OutlineInputBorder(),
+                          suffixIcon: IconButton(
+                            tooltip: 'Tìm biển báo theo ID',
+                            icon: const Icon(Icons.search),
+                            onPressed: repository == null ? null : () async {
+                              final id = int.tryParse(idController.text.trim());
+                              if (id == null) return;
+                              final sign = await repository.byId(id);
+                              if (!mounted || !sheetContext.mounted) return;
+                              Navigator.of(sheetContext).pop();
+                              if (sign == null) {
+                                ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Không tìm thấy biển báo')),
+                                );
+                                return;
+                              }
+                              final controller = _map;
+                              _followCar = false;
+                              if (controller != null && _styleReady) {
+                                await controller.animateCamera(
+                                  gl.CameraUpdate.newCameraPosition(
+                                    gl.CameraPosition(
+                                      target: gl.LatLng(
+                                        sign.latitude, sign.longitude),
+                                      zoom: 17,
+                                      tilt: widget.flat2D
+                                          ? 0 : widget.pitchDegrees,
+                                    ),
+                                  ),
+                                  duration: const Duration(milliseconds: 300),
+                                );
+                              }
+                              _scheduleSignViewport(force: true);
+                              if (mounted) {
+                                unawaited(_showSignDetails(sign.signId));
+                              }
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Dữ liệu chưa xác minh hiệu lực. Tốc độ có dấu ~ là '
+                        'giá trị suy ra, không phải giới hạn pháp lý.',
+                        style: TextStyle(
+                          color: Colors.amberAccent, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      );
+    } finally {
+      idController.dispose();
+    }
+  }
+
   Future<void> _showSignDetails(int id) async {
     final repository = _signRepository;
     if (repository == null) return;
