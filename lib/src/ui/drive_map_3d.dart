@@ -35,6 +35,7 @@ class DriveMap3D extends StatefulWidget {
     required this.routePoints,
     this.flat2D = false,
     this.onRoadNameChanged,
+    this.onProtectedStyleReady,
   });
   final double? latitude, longitude;
   final double headingDegrees, pitchDegrees, speedKmh;
@@ -43,6 +44,8 @@ class DriveMap3D extends StatefulWidget {
   final bool flat2D;
   final List<TripRoutePoint> routePoints;
   final ValueChanged<String?>? onRoadNameChanged;
+  /// Fired only after app-owned maritime redaction and labels are active.
+  final VoidCallback? onProtectedStyleReady;
 
   @override
   State<DriveMap3D> createState() => DriveMap3DState();
@@ -925,6 +928,13 @@ class DriveMap3DState extends State<DriveMap3D> {
                                   ? 'Chưa nhập database biển báo thật.'
                                   : 'Trong vùng: ${_signVisible.total} biển báo',
                         style: const TextStyle(color: Colors.white70)),
+                      if (repository != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4, bottom: 6),
+                          child: Text(repository.queryMetrics.summary,
+                            style: const TextStyle(
+                              color: Colors.white70, fontSize: 11)),
+                        ),
                       if (repository == null && !_signLoading)
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 8),
@@ -1130,6 +1140,10 @@ class DriveMap3DState extends State<DriveMap3D> {
     if (!_styleActive(controller, epoch)) return;
     if (mounted) {
       setState(() => _maritimeProtectionReady = protectionReady);
+    }
+    if (protectionReady && _styleActive(controller, epoch)) {
+      // A parent can now cancel an auto-recovery timeout safely.
+      widget.onProtectedStyleReady?.call();
     }
     // Never draw reference signs over an unverified/failed maritime cover.
     if (protectionReady) await _installTrafficSignLayers(controller, epoch);

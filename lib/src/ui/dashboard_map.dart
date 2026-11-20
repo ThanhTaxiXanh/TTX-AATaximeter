@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
@@ -8,6 +9,7 @@ import 'route_render_geometry.dart';
 import 'drive_map_3d.dart';
 import 'follow_camera_gate.dart';
 import 'raster_tile_failover.dart';
+import 'map_base_source_policy.dart';
 import 'driver_pro_design.dart';
 import 'vietnam_map_sovereignty.dart';
 import 'map_sovereignty_hud.dart';
@@ -32,11 +34,14 @@ class DashboardMap extends StatefulWidget {
     required this.showCurrentRoadName,
     this.routePoints = const [],
     this.height = 335,
+    this.initial2DBaseSource = Map2DBaseSource.raster,
   });
   final double? latitude, longitude;
   final double speedKmh, speedLimitKmh, headingDegrees, pitchDegrees;
   final bool is3D, dark, showCurrentRoadName;
   final double height;
+  /// Optional initial reference-only canvas, useful when starting offline.
+  final Map2DBaseSource initial2DBaseSource;
   final VoidCallback onLocate, onToggle3D, onToggleDark;
   final List<TripRoutePoint> routePoints;
 
@@ -62,7 +67,14 @@ class _DashboardMapState extends State<DashboardMap> {
   final FollowCameraGate _twoDFollowGate =
       FollowCameraGate(minimumDistanceMeters: 3.0);
   final RasterTileFailover _tileFailover = RasterTileFailover();
-  bool _vector2DFallback = false;
+  late Map2DBaseSource _map2DSource;
+  final VectorStyleRecoveryGate _vectorStyleRecoveryGate =
+      VectorStyleRecoveryGate();
+  Timer? _vectorStyleRecoveryTimer;
+  // This applies ONLY to automatic raster failure -> vector fallback.
+  // Manual vector browsing and genuine 3D are never timed out.
+  static const _vectorStyleRecoveryWindow = Duration(seconds: 16);
+
   String? _currentRoadName;
   int _rasterTileEpoch = 0;
   // Route points are append-only within a trip. Rebuild polyline geometries
@@ -71,6 +83,12 @@ class _DashboardMapState extends State<DashboardMap> {
   TripRoutePoint? _cachedRouteTail;
   List<fm.Polyline> _cachedRouteLines = const [];
   final RouteRenderGeometryCache _routeGeometry = RouteRenderGeometryCache();
+
+  @override
+  void initState() {
+    super.initState();
+    _map2DSource = widget.initial2DBaseSource;
+  }
 
   bool get _hasFix {
     final lat = widget.latitude, lon = widget.longitude;
@@ -84,6 +102,7 @@ class _DashboardMapState extends State<DashboardMap> {
   @override
   void didUpdateWidget(covariant DashboardMap old) {
     super.didUpdateWidget(old);
+    if (old.is3D != widget.is3D) _cancelVectorStyleRecovery();
     if (old.is3D != widget.is3D ||
         old.showCurrentRoadName != widget.showCurrentRoadName) {
       _currentRoadName = null;
@@ -110,13 +129,13 @@ class _DashboardMapState extends State<DashboardMap> {
   }
 
   void _focusOnSign(double latitude, double longitude) {
-    if (!_ready || widget.is3D || _vector2DFallback) return;
+    if (!_ready || widget.is3D || _map2DSource.usesVectorStyle) return;
     setState(() => _follow = false);
     _map.move(ll.LatLng(latitude, longitude), 17);
   }
 
   void _zoomToSignCluster(SignMapItem item) {
-    if (!_ready || widget.is3D || _vector2DFallback) return;
+    if (!_ready || widget.is3D || _map2DSource.usesVectorStyle) return;
     setState(() => _follow = false);
     _map.move(ll.LatLng(item.latitude, item.longitude),
       (_map.camera.zoom + 2).clamp(3.0, 19.0).toDouble());
@@ -127,7 +146,7 @@ class _DashboardMapState extends State<DashboardMap> {
       widget.onLocate();
       return;
     }
-    if (widget.is3D || _vector2DFallback) {
+    if (widget.is3D || _map2DSource.usesVectorStyle) {
       _activeVectorMap?.centerOnCar();
       return;
     }
@@ -137,7 +156,7 @@ class _DashboardMapState extends State<DashboardMap> {
   }
 
   void _zoom(double amount) {
-    if (widget.is3D || _vector2DFallback) {
+    if (widget.is3D || _map2DSource.usesVectorStyle) {
       _activeVectorMap?.zoomBy(amount);
       return;
     }
@@ -146,31 +165,66 @@ class _DashboardMapState extends State<DashboardMap> {
       (_map.camera.zoom + amount).clamp(3.0, 19.0).toDouble());
   }
 
+  void _cancelVectorStyleRecovery() {
+    _vectorStyleRecoveryTimer?.cancel();
+    _vectorStyleRecoveryTimer = null;
+    _vectorStyleRecoveryGate.cancel();
+  }
+
+  void _onProtectedVectorStyleReady() {
+    // The vector camera is safe to expose only after the maritime
+    // redaction/label layers have been installed successfully.
+    if (!mounted || widget.is3D || !_map2DSource.usesVectorStyle) return;
+    _cancelVectorStyleRecovery();
+  }
+
+  void _armVectorStyleRecovery() {
+    _vectorStyleRecoveryTimer?.cancel();
+    final ticket = _vectorStyleRecoveryGate.arm();
+    _vectorStyleRecoveryTimer = Timer(_vectorStyleRecoveryWindow, () {
+      if (!_vectorStyleRecoveryGate.consumeTimeout(ticket)) return;
+      if (!mounted || widget.is3D || !_map2DSource.usesVectorStyle) return;
+      // Keep the GPS and its complete trip route; ONLY the map base changes.
+      debugPrint('Online vector fallback unavailable; showing local GPS/sign '
+          'reference canvas without requesting map tiles');
+      setState(() {
+        ++_rasterTileEpoch;
+        _ready = false;
+        _follow = true;
+        _map2DSource = Map2DBaseSource.offlineSigns;
+        _twoDFollowGate.reset();
+      });
+    });
+  }
+
   /// A run of failed OSM raster requests is a signal to switch sources, not
   /// a signal to abandon GPS. MapLibre uses the already-configured legal
   /// OpenFreeMap vector service, only as an on-demand fallback.
   void _handleRasterTileError(Object error, int requestEpoch) {
     // A prior TileLayer may complete after a manual retry or mode switch.
     if (requestEpoch != _rasterTileEpoch ||
-        widget.is3D || _vector2DFallback) return;
+        widget.is3D || !_map2DSource.fetchesRasterTiles) return;
     debugPrint('TTX 2D raster tile failed: $error');
     if (!_tileFailover.recordFailure()) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || widget.is3D || !_tileFailover.useVectorFallback) return;
+      if (!mounted || widget.is3D || !_tileFailover.useVectorFallback ||
+          !_map2DSource.fetchesRasterTiles) return;
       setState(() {
         _ready = false;
-        _vector2DFallback = true;
+        _map2DSource = Map2DBaseSource.vector;
       });
+      _armVectorStyleRecovery();
     });
   }
 
   void _select2DBaseMap() {
     if (widget.is3D) return;
+    _cancelVectorStyleRecovery();
     setState(() {
       // Invalidate late raster callbacks before changing the source.
       _rasterTileEpoch++;
       _tileFailover.reset();
-      _vector2DFallback = !_vector2DFallback;
+      _map2DSource = _map2DSource.next;
       _ready = false;
       _follow = true;
       _twoDFollowGate.reset();
@@ -202,6 +256,7 @@ class _DashboardMapState extends State<DashboardMap> {
 
   @override
   void dispose() {
+    _cancelVectorStyleRecovery();
     _map.dispose();
     _signMapCamera.dispose();
     super.dispose();
@@ -246,7 +301,11 @@ class _DashboardMapState extends State<DashboardMap> {
       },
     ),
     children: [
-      _rasterTileLayer(),
+      if (_map2DSource.fetchesRasterTiles)
+        _rasterTileLayer()
+      else
+        ColoredBox(color: widget.dark
+          ? const Color(0xFF13283D) : const Color(0xFFE7F1F7)),
       // Cover unverified third-party maritime imagery, place names and
       // border graphics BEFORE drawing app-controlled names / GPS tracks.
       // These polygons have NO borders and are NOT territorial geometry.
@@ -264,6 +323,15 @@ class _DashboardMapState extends State<DashboardMap> {
             borderStrokeWidth: 0,
           ),
       ]),
+      // Viewport-sized read-only signs, below GPS guidance and vehicle.
+      TrafficSignMap2D(
+        key: _sign2DKey,
+        camera: _signMapCamera,
+        onFocus: _focusOnSign,
+        onCluster: _zoomToSignCluster,
+      ),
+      // Render app-controlled geographical names ABOVE unverified sign
+      // markers; do not allow dense sign clusters to obscure island names.
       // Explicit Vietnam-facing maritime name anchors. These are labels,
       // not geographic polygons or border claims; externally supplied tile
       // graphics still require independent publication review.
@@ -290,13 +358,6 @@ class _DashboardMapState extends State<DashboardMap> {
             )),
           ),
       ]),
-      // Viewport-sized read-only signs, below GPS guidance and vehicle.
-      TrafficSignMap2D(
-        key: _sign2DKey,
-        camera: _signMapCamera,
-        onFocus: _focusOnSign,
-        onCluster: _zoomToSignCluster,
-      ),
       if (routeLines.isNotEmpty) fm.PolylineLayer(polylines: routeLines),
       if (_hasFix) fm.MarkerLayer(markers: [
         fm.Marker(
@@ -419,7 +480,7 @@ class _DashboardMapState extends State<DashboardMap> {
     child: SizedBox(
       height: widget.height,
       child: Stack(children: [
-        Positioned.fill(child: (widget.is3D || _vector2DFallback)
+        Positioned.fill(child: (widget.is3D || _map2DSource.usesVectorStyle)
           ? DriveMap3D(
               key: widget.is3D ? _driveKey : _flatVectorKey,
               flat2D: !widget.is3D,
@@ -430,6 +491,10 @@ class _DashboardMapState extends State<DashboardMap> {
               pitchDegrees: widget.pitchDegrees,
               dark: widget.dark,
               routePoints: widget.routePoints,
+              onProtectedStyleReady:
+                (!widget.is3D && _map2DSource.usesVectorStyle)
+                    ? _onProtectedVectorStyleReady
+                    : null,
               onRoadNameChanged: widget.showCurrentRoadName
                 ? (value) {
                     if (!mounted || value == _currentRoadName) return;
@@ -464,8 +529,9 @@ class _DashboardMapState extends State<DashboardMap> {
                       ? DriverProColors.green : DriverProColors.amber),
                 const SizedBox(width: 4),
                 Text(_hasFix ? (widget.is3D ? 'GPS • 3D'
-                    : (_vector2DFallback ? 'GPS • VECTOR'
-                    : 'VỊ TRÍ GPS')) : 'CHỜ GPS',
+                    : (_map2DSource.usesVectorStyle ? 'GPS • VECTOR'
+                    : (_map2DSource.referenceOnly ? 'GPS • BIỂN BÁO'
+                    : 'VỊ TRÍ GPS'))) : 'CHỜ GPS',
                   style: const TextStyle(
                     color: Colors.white, fontSize: 10,
                     fontWeight: FontWeight.w800)),
@@ -490,7 +556,7 @@ class _DashboardMapState extends State<DashboardMap> {
             const Icon(Icons.signpost_outlined,
               color: DriverProColors.cyan, size: 22),
             () {
-              if (widget.is3D || _vector2DFallback) {
+              if (widget.is3D || _map2DSource.usesVectorStyle) {
                 _activeVectorMap?.showSignFilters();
               } else {
                 _sign2DKey.currentState?.showFilters();
@@ -501,12 +567,11 @@ class _DashboardMapState extends State<DashboardMap> {
         Positioned(right: 7, top: 48,
           child: Column(children: [
             if (!widget.is3D)
-              _button(Icon(_vector2DFallback
+              _button(Icon(_map2DSource.referenceOnly
                   ? Icons.refresh_rounded : Icons.layers_outlined,
                   color: DriverProColors.cyan, size: 22),
                 _select2DBaseMap,
-                _vector2DFallback ? 'Thử lại nền OSM'
-                    : 'Đổi nền 2D sang OpenFreeMap'),
+                'Đổi nguồn: ${_map2DSource.next.sourceDescription}'),
             _button(Icon(widget.dark
                   ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
                 color: DriverProColors.amber, size: 22),
@@ -524,7 +589,32 @@ class _DashboardMapState extends State<DashboardMap> {
               () => _zoom(-1), 'Thu nhỏ'),
           ]),
         ),
-        if (widget.showCurrentRoadName)
+        if (!widget.is3D && _map2DSource.referenceOnly)
+          const Positioned(
+            left: 8, bottom: 7, right: 8,
+            child: IgnorePointer(
+              child: Align(
+                alignment: Alignment.bottomLeft,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Color(0xEE11283D),
+                    borderRadius: BorderRadius.all(Radius.circular(7)),
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 5),
+                    child: Text(
+                      'CHỈ GPS / BIỂN BÁO · KHÔNG CÓ BẢN ĐỒ NỀN',
+                      style: TextStyle(
+                        color: Colors.white, fontSize: 9,
+                        fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        if (widget.showCurrentRoadName && !_map2DSource.referenceOnly)
           Positioned(right: 8, bottom: 27,
             child: IgnorePointer(child: ConstrainedBox(
               // A short road like "QL1A" only uses its text width; longer
@@ -558,7 +648,7 @@ class _DashboardMapState extends State<DashboardMap> {
             )),
           ),
         Positioned(left: 8, bottom: 8, child: _speedPanel()),
-        if (!widget.is3D && !_vector2DFallback)
+        if (!widget.is3D && !_map2DSource.usesVectorStyle)
           const Positioned(right: 5, bottom: 3,
             child: Text('© OpenStreetMap contributors',
               style: TextStyle(fontSize: 9, color: Colors.black87,

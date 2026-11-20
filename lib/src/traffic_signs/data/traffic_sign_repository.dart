@@ -1,12 +1,14 @@
 import 'package:sqflite/sqflite.dart';
 
 import '../domain/traffic_sign.dart';
+import 'traffic_sign_query_metrics.dart';
 
 /// Read-only spatial queries; independent of taximeter/trip SQLite.
 class TrafficSignRepository {
   TrafficSignRepository(this.database);
 
   final Database database;
+  final TrafficSignQueryMetrics queryMetrics = TrafficSignQueryMetrics();
   static const int maxVisibleItems = 320;
 
   Future<TrafficSign?> byId(int signId) async {
@@ -29,7 +31,19 @@ class TrafficSignRepository {
   Future<SignViewportResult> viewport(
       SignViewport bounds, TrafficSignFilter filter) async {
     if (!filter.enabled || !bounds.isValid) return SignViewportResult.empty;
+    final stopwatch = Stopwatch()..start();
+    try {
+      final value = await _queryViewport(bounds, filter);
+      queryMetrics.record(stopwatch.elapsed, succeeded: true);
+      return value;
+    } catch (_) {
+      queryMetrics.record(stopwatch.elapsed, succeeded: false);
+      rethrow;
+    }
+  }
 
+  Future<SignViewportResult> _queryViewport(
+      SignViewport bounds, TrafficSignFilter filter) async {
     final args = <Object?>[
       bounds.east, bounds.west, bounds.north, bounds.south,
       bounds.west, bounds.east, bounds.south, bounds.north,

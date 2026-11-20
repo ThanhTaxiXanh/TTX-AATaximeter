@@ -44,15 +44,26 @@ abstract final class TrafficSignDatabase {
     if (await target.exists() && await marker.exists() &&
         (await marker.readAsString()).trim() == expectedSha256) {
       try {
+        // The marker is not a checksum of today's bytes. Verify the actual
+        // cache once per app process before accepting it as owner data.
+        // The shared _opened future prevents this 21 MB stream from being
+        // repeated every time the driver changes between 2D and 3D.
+        final digest = await sha256.bind(target.openRead()).first;
+        if (digest.toString() != expectedSha256) {
+          throw StateError('Cached traffic-sign SQLite SHA-256 mismatch');
+        }
         final existing = await openDatabase(target.path, readOnly: true);
         try {
           await _verifyMetadata(existing);
           return TrafficSignRepository(existing);
         } catch (_) {
           await existing.close();
+          rethrow;
         }
-      } catch (_) {
-        // Damaged cache can be recovered from the owner-approved asset.
+      } catch (error) {
+        debugPrint('Traffic-sign cache rejected: $error');
+        // Damaged cache can be recovered only from a verified bundled
+        // asset or a new owner-selected import; never trust the marker.
       }
     }
 
