@@ -136,6 +136,15 @@ dependencies {
 """, "")
 gradle.write_text(content)
 
+# A separate user-installed QA app has its own package, data sandbox and icon
+# label. This is opt-in: local/production bootstrap stays unchanged.
+if os.getenv("TTX_QA_BUILD") == "1":
+    from android_qa_identity import configure_qa_identity, assert_qa_identity
+
+    configure_qa_identity(gradle, path)
+    assert_qa_identity(gradle, path)
+    print("Isolated QA package identity configured.")
+
 print("Android GPS permissions and native Flutter display bridge installed.")
 print("Experimental CarAppService compiled:", include_car_scaffold)
 print("CarAppService is still unregistered; no eligible Android Auto host yet.")
