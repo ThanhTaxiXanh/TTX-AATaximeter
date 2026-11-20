@@ -105,7 +105,8 @@ class DriveMap3DState extends State<DriveMap3D> {
     if (layerId != TrafficSignVectorSource.circlesId &&
         layerId != TrafficSignVectorSource.labelsId) return;
     final item = TrafficSignVectorSource.tapped(id, _signDisplayedById);
-    if (item == null || !_maritimeProtectionReady) return;
+    if (item == null || !_maritimeProtectionReady ||
+        !_signFilter.enabled) return;
     final now = DateTime.now();
     if (_lastTappedSign == id && _lastSignTapAt != null &&
         now.difference(_lastSignTapAt!) <
@@ -737,6 +738,8 @@ class DriveMap3DState extends State<DriveMap3D> {
           circleStrokeWidth: 1.6,
           circlePitchAlignment: 'viewport',
         ),
+        // Geographic maritime labels must remain above traffic signs.
+        belowLayerId: 'ttx-vietnam-maritime-label-text',
         minzoom: 3, maxzoom: 22,
       );
       if (!_styleActive(controller, styleEpoch)) return;
@@ -754,6 +757,7 @@ class DriveMap3DState extends State<DriveMap3D> {
           textIgnorePlacement: true,
           textPitchAlignment: 'viewport',
         ),
+        belowLayerId: 'ttx-vietnam-maritime-label-text',
         minzoom: 3, maxzoom: 22,
       );
       if (!_styleActive(controller, styleEpoch)) return;
