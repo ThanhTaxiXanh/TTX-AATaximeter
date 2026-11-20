@@ -242,6 +242,12 @@ class DriveMap3DState extends State<DriveMap3D> {
   void didUpdateWidget(covariant DriveMap3D oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.dark != widget.dark) {
+      _signQueryTimer?.cancel();
+      _signRequestEpoch++;
+      _signLayersReady = false;
+      _lastSignCoverage = null;
+      _lastSignZoom = null;
+      _signDisplayedById = const {};
       _maritimeProtectionReady = false;
       _styleEpoch.invalidate();
       _routeRenderTimer?.cancel();
@@ -888,6 +894,13 @@ class DriveMap3DState extends State<DriveMap3D> {
     final controller = _map;
     if (controller == null || !mounted) return;
     final epoch = _styleEpoch.begin();
+    _signQueryTimer?.cancel();
+    _signRequestEpoch++;
+    _signLayersReady = false;
+    _signDisplayedById = const {};
+    _signVisible = SignViewportResult.empty;
+    _lastSignCoverage = null;
+    _lastSignZoom = null;
     _maritimeProtectionReady = false;
     _styleReady = true;
     _routeRenderTimer?.cancel();
@@ -936,6 +949,9 @@ class DriveMap3DState extends State<DriveMap3D> {
     if (mounted) {
       setState(() => _maritimeProtectionReady = protectionReady);
     }
+    // Never draw reference signs over an unverified/failed maritime cover.
+    if (protectionReady) await _installTrafficSignLayers(controller, epoch);
+    if (!_styleActive(controller, epoch)) return;
     try {
       await controller.addGeoJsonSource('ttx-route', _routeGeoJson());
       if (!_styleActive(controller, epoch)) return;
@@ -995,6 +1011,9 @@ class DriveMap3DState extends State<DriveMap3D> {
 
   @override
   void dispose() {
+    _signRequestEpoch++;
+    _signQueryTimer?.cancel();
+    _map?.onFeatureTapped.remove(_signTapCallback);
     _styleEpoch.dispose();
     _routeRenderTimer?.cancel();
     _routeRenderTimer = null;
@@ -1024,11 +1043,17 @@ class DriveMap3DState extends State<DriveMap3D> {
           ? const Color(0xFF101A28) : const Color(0xFFEEEAE0),
       onMapCreated: (controller) {
         if (!identical(_map, controller)) {
+          _map?.onFeatureTapped.remove(_signTapCallback);
+          controller.onFeatureTapped.add(_signTapCallback);
           _maritimeProtectionReady = false;
+          _signLayersReady = false;
+          _signRequestEpoch++;
           _styleEpoch.invalidate();
         }
         _map = controller;
       },
+      trackCameraPosition: true,
+      onCameraIdle: () => _scheduleSignViewport(),
       onStyleLoadedCallback: () => unawaited(_onStyleLoaded()),
     ),
     ),
