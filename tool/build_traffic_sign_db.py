@@ -177,7 +177,7 @@ def build_database(traffic: Path, speed: Path, output: Path) -> dict:
                 db.execute("SELECT COUNT(*) FROM traffic_sign_rtree").fetchone()[0],
                 db.execute("SELECT COUNT(*) FROM traffic_signs WHERE speed_kmh_inferred IS NOT NULL").fetchone()[0],
             )
-            if counts != (151228, 151228, 38757):
+            if counts != (len(primary), len(primary), len(inferred)):
                 raise ValueError(f"database row-count mismatch: {counts}")
             result = db.execute("PRAGMA integrity_check").fetchone()[0]
             if result != "ok":
