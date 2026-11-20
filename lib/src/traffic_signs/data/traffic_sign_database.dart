@@ -35,6 +35,11 @@ abstract final class TrafficSignDatabase {
     await folder.create(recursive: true);
     final target = File(path.join(folder.path, 'traffic_signs_v1.sqlite'));
     final marker = File('${target.path}.sha256');
+    // Recover an interrupted atomic swap of this standalone sign cache.
+    final previous = File('${target.path}.previous');
+    if (!await target.exists() && await previous.exists()) {
+      await previous.rename(target.path);
+    }
 
     if (await target.exists() && await marker.exists() &&
         (await marker.readAsString()).trim() == expectedSha256) {
@@ -75,10 +80,7 @@ abstract final class TrafficSignDatabase {
       } finally {
         await candidate.close();
       }
-      // Existing database is a disposable cache, not taxi trip storage.
-      if (await target.exists()) await target.delete();
-      await temporary.rename(target.path);
-      await marker.writeAsString(expectedSha256, flush: true);
+      await _promoteChecked(temporary, target, marker);
       final installed = await openDatabase(target.path, readOnly: true);
       return TrafficSignRepository(installed);
     } finally {
@@ -111,15 +113,8 @@ abstract final class TrafficSignDatabase {
       } finally {
         await candidate.close();
       }
-      // Only the dedicated disposable sign cache can be replaced.
-      // A valid prior installation is not overwritten by the UI.
-      if (await target.exists() && await marker.exists() &&
-          (await marker.readAsString()).trim() == expectedSha256) {
-        throw StateError('Database biển báo đã được cài đặt');
-      }
-      if (await target.exists()) await target.delete();
-      await temporary.rename(target.path);
-      await marker.writeAsString(expectedSha256, flush: true);
+      // Old cache is never removed until the replacement has passed checks.
+      await _promoteChecked(temporary, target, marker);
       final database = await openDatabase(target.path, readOnly: true);
       final repository = TrafficSignRepository(database);
       _opened = Future.value(repository);
@@ -152,6 +147,33 @@ abstract final class TrafficSignDatabase {
     } finally {
       if (await temporary.exists()) await temporary.delete();
     }
+  }
+
+  /// A replacement of the isolated traffic-sign cache is rollback-safe.
+  /// The trip/billing SQLite database and user settings are untouched.
+  static Future<void> _promoteChecked(
+      File temporary, File target, File marker) async {
+    final previous = File('${target.path}.previous');
+    if (await previous.exists() && !await target.exists()) {
+      await previous.rename(target.path);
+    }
+    if (await previous.exists()) await previous.delete();
+    if (await target.exists()) await target.rename(previous.path);
+    try {
+      await temporary.rename(target.path);
+      await marker.writeAsString(expectedSha256, flush: true);
+      final verified = await openDatabase(target.path, readOnly: true);
+      try {
+        await _verifyMetadata(verified);
+      } finally {
+        await verified.close();
+      }
+    } catch (_) {
+      if (await target.exists()) await target.delete();
+      if (await previous.exists()) await previous.rename(target.path);
+      rethrow;
+    }
+    if (await previous.exists()) await previous.delete();
   }
 
   static Future<void> _verifyMetadata(Database db) async {
