@@ -187,20 +187,10 @@ class DriveMap3DState extends State<DriveMap3D> {
     _signRequestEpoch++;
     _signQueryTimer?.cancel();
     _lastSignCoverage = null;
-    // Empty the old native source on toggling filters.
-    final controller = _map;
-    if (controller != null && _signLayersReady &&
-        _styleActive(controller, _styleEpoch.revision)) {
-      unawaited(controller.setGeoJsonSource(
-        TrafficSignVectorSource.sourceId,
-        TrafficSignVectorSource.features(const []),
-      ).catchError((Object error) {
-        debugPrint('Unable to clear vector sign source: $error');
-      }));
-    }
     _signDisplayedById = const {};
     unawaited(_persistSignFilter(next));
-    if (next.enabled) _scheduleSignViewport(force: true);
+    // Serialized native source updates prevent stale markers after toggles.
+    _scheduleSignViewport(force: true);
   }
 
 
@@ -716,6 +706,181 @@ class DriveMap3DState extends State<DriveMap3D> {
       // unreviewed provider map. Keep an opaque safety panel above MapLibre.
       debugPrint('Vietnam maritime redaction unavailable: $error');
       return false;
+    }
+  }
+
+
+  Future<void> _installTrafficSignLayers(
+      gl.MapLibreMapController controller, int styleEpoch) async {
+    if (!_styleActive(controller, styleEpoch) ||
+        !_maritimeProtectionReady) return;
+    try {
+      await controller.addGeoJsonSource(
+        TrafficSignVectorSource.sourceId,
+        TrafficSignVectorSource.features(const []),
+      );
+      if (!_styleActive(controller, styleEpoch)) return;
+      await controller.addCircleLayer(
+        TrafficSignVectorSource.sourceId,
+        TrafficSignVectorSource.circlesId,
+        const gl.CircleLayerProperties(
+          circleRadius: ['case', ['>', ['get', 'count'], 1], 22, 19],
+          circleColor: '#143047',
+          circleOpacity: 0.96,
+          circleStrokeColor: '#00C2FF',
+          circleStrokeWidth: 1.6,
+          circlePitchAlignment: 'viewport',
+        ),
+        minzoom: 3, maxzoom: 22,
+      );
+      if (!_styleActive(controller, styleEpoch)) return;
+      await controller.addSymbolLayer(
+        TrafficSignVectorSource.sourceId,
+        TrafficSignVectorSource.labelsId,
+        const gl.SymbolLayerProperties(
+          textField: ['get', 'display'],
+          textFont: ['Noto Sans Regular'],
+          textSize: 12,
+          textColor: '#FFFFFF',
+          textHaloColor: '#112438',
+          textHaloWidth: 1,
+          textAllowOverlap: true,
+          textIgnorePlacement: true,
+          textPitchAlignment: 'viewport',
+        ),
+        minzoom: 3, maxzoom: 22,
+      );
+      if (!_styleActive(controller, styleEpoch)) return;
+      _signLayersReady = true;
+      _scheduleSignViewport(force: true);
+    } catch (error) {
+      _signLayersReady = false;
+      debugPrint('Optional MapLibre sign layer not available: $error');
+      // Sign failure must not fail taxi tracking or the maritime protection.
+    }
+  }
+
+  void _scheduleSignViewport({bool force = false}) {
+    _signQueryTimer?.cancel();
+    final controller = _map;
+    final styleEpoch = _styleEpoch.revision;
+    final requestEpoch = ++_signRequestEpoch;
+    if (controller == null || !_signLayersReady ||
+        !_styleActive(controller, styleEpoch) ||
+        !_maritimeProtectionReady) return;
+    _signQueryTimer = Timer(const Duration(milliseconds: 220), () {
+      unawaited(_querySignViewport(controller, styleEpoch, requestEpoch,
+        force: force));
+    });
+  }
+
+  Future<void> _querySignViewport(
+    gl.MapLibreMapController controller, int styleEpoch,
+    int requestEpoch, {required bool force},
+  ) async {
+    if (!_styleActive(controller, styleEpoch) ||
+        !_signLayersReady || requestEpoch != _signRequestEpoch) return;
+    final repository = _signRepository;
+    if (!_signFilter.enabled || repository == null) {
+      await _publishSignSource(controller, styleEpoch, requestEpoch,
+        SignViewportResult.empty, null, null);
+      return;
+    }
+    try {
+      final region = await controller.getVisibleRegion();
+      if (!_styleActive(controller, styleEpoch) ||
+          requestEpoch != _signRequestEpoch) return;
+      final viewport = SignViewport(
+        west: region.southwest.longitude,
+        south: region.southwest.latitude,
+        east: region.northeast.longitude,
+        north: region.northeast.latitude,
+      );
+      if (!viewport.isValid) {
+        await _publishSignSource(controller, styleEpoch, requestEpoch,
+          SignViewportResult.empty, null, null);
+        return;
+      }
+      final zoom = controller.cameraPosition?.zoom;
+      if (!force && _lastSignCoverage?.contains(viewport) == true &&
+          _lastSignZoom != null && zoom != null &&
+          (zoom - _lastSignZoom!).abs() < 0.8) return;
+      final covered = viewport.expanded();
+      final result = await repository.viewport(covered, _signFilter);
+      if (!_styleActive(controller, styleEpoch) ||
+          requestEpoch != _signRequestEpoch) return;
+      await _publishSignSource(controller, styleEpoch, requestEpoch,
+        result, covered, zoom);
+    } catch (error) {
+      if (_styleActive(controller, styleEpoch) &&
+          requestEpoch == _signRequestEpoch) {
+        _signError = error.toString();
+        debugPrint('MapLibre sign viewport query unavailable: $error');
+      }
+    }
+  }
+
+  bool _signUploadPending = false;
+
+  Future<void> _publishSignSource(
+    gl.MapLibreMapController controller, int styleEpoch,
+    int requestEpoch, SignViewportResult result,
+    SignViewport? covered, double? zoom,
+  ) async {
+    if (_signUploadBusy) {
+      _signUploadPending = true;
+      return;
+    }
+    if (!_styleActive(controller, styleEpoch) ||
+        requestEpoch != _signRequestEpoch || !_signLayersReady) return;
+    _signUploadBusy = true;
+    try {
+      await controller.setGeoJsonSource(
+        TrafficSignVectorSource.sourceId,
+        TrafficSignVectorSource.features(result.items),
+      );
+      if (!_styleActive(controller, styleEpoch) ||
+          requestEpoch != _signRequestEpoch) {
+        _signUploadPending = true;
+        return;
+      }
+      _lastSignCoverage = covered;
+      _lastSignZoom = zoom;
+      _signVisible = result;
+      _signDisplayedById = {
+        for (final item in result.items)
+          TrafficSignVectorSource.featureId(item): item,
+      };
+      _signError = null;
+    } catch (error) {
+      if (_styleActive(controller, styleEpoch)) {
+        _signError = error.toString();
+        debugPrint('Native MapLibre sign source update failed: $error');
+      }
+    } finally {
+      _signUploadBusy = false;
+      if (_signUploadPending && _styleActive(controller, styleEpoch)) {
+        _signUploadPending = false;
+        _scheduleSignViewport(force: true);
+      }
+    }
+  }
+
+  Future<void> _showSignDetails(int id) async {
+    final repository = _signRepository;
+    if (repository == null) return;
+    try {
+      final sign = await repository.byId(id);
+      if (!mounted) return;
+      if (sign == null) return;
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: const Color(0xFF101D2D),
+        builder: (_) => TrafficSignDetails(sign: sign),
+      );
+    } catch (error) {
+      debugPrint('MapLibre traffic-sign detail unavailable: $error');
     }
   }
 
