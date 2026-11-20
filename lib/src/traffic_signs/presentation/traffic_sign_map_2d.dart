@@ -267,9 +267,9 @@ class TrafficSignMap2DState extends State<TrafficSignMap2D> {
                                 ));
                                 late final TrafficSignRepository installed;
                                 try {
-                                  await picked.readAsByteStream().pipe(
-                                    temporary.openWrite(),
-                                  );
+                                  await picked.readAsByteStream()
+                                      .cast<List<int>>()
+                                      .pipe(temporary.openWrite());
                                   installed =
                                       await TrafficSignDatabase.installFromFile(
                                           temporary);
