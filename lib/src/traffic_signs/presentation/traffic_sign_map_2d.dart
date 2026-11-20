@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -49,10 +50,10 @@ class TrafficSignMap2DState extends State<TrafficSignMap2D> {
   }
 
   @override
-  void didUpdateWidget(covariant TrafficSignMap2D old) {
-    super.didUpdateWidget(old);
-    if (old.camera != widget.camera) {
-      old.camera.removeListener(_scheduleViewport);
+  void didUpdateWidget(covariant TrafficSignMap2D oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.camera != widget.camera) {
+      oldWidget.camera.removeListener(_scheduleViewport);
       widget.camera.addListener(_scheduleViewport);
       _scheduleViewport();
     }
