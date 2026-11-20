@@ -83,7 +83,10 @@ def check_source() -> list[str]:
     for term in ("if (_map2DSource.fetchesRasterTiles)",
                  "TrafficSignMap2D(",
                  "MapSovereigntyHud()",
-                 "CHỈ GPS / BIỂN BÁO · KHÔNG CÓ BẢN ĐỒ NỀN"):
+                 "CHỈ GPS / BIỂN BÁO · KHÔNG CÓ BẢN ĐỒ NỀN",
+                 "_armVectorStyleRecovery()",
+                 "_vectorStyleRecoveryGate.consumeTimeout(ticket)",
+                 "onProtectedStyleReady:"):
         assert_contains(dashboard, term, "Offline sign reference screen", errors)
     source_mode = ROOT / "lib/src/ui/map_base_source_policy.dart"
     if not source_mode.is_file():
