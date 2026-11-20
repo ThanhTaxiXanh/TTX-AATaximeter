@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
@@ -67,6 +68,13 @@ class _DashboardMapState extends State<DashboardMap> {
       FollowCameraGate(minimumDistanceMeters: 3.0);
   final RasterTileFailover _tileFailover = RasterTileFailover();
   late Map2DBaseSource _map2DSource;
+  final VectorStyleRecoveryGate _vectorStyleRecoveryGate =
+      VectorStyleRecoveryGate();
+  Timer? _vectorStyleRecoveryTimer;
+  // This applies ONLY to automatic raster failure -> vector fallback.
+  // Manual vector browsing and genuine 3D are never timed out.
+  static const _vectorStyleRecoveryWindow = Duration(seconds: 16);
+
   String? _currentRoadName;
   int _rasterTileEpoch = 0;
   // Route points are append-only within a trip. Rebuild polyline geometries
@@ -94,6 +102,7 @@ class _DashboardMapState extends State<DashboardMap> {
   @override
   void didUpdateWidget(covariant DashboardMap old) {
     super.didUpdateWidget(old);
+    if (old.is3D != widget.is3D) _cancelVectorStyleRecovery();
     if (old.is3D != widget.is3D ||
         old.showCurrentRoadName != widget.showCurrentRoadName) {
       _currentRoadName = null;
@@ -156,6 +165,38 @@ class _DashboardMapState extends State<DashboardMap> {
       (_map.camera.zoom + amount).clamp(3.0, 19.0).toDouble());
   }
 
+  void _cancelVectorStyleRecovery() {
+    _vectorStyleRecoveryTimer?.cancel();
+    _vectorStyleRecoveryTimer = null;
+    _vectorStyleRecoveryGate.cancel();
+  }
+
+  void _onProtectedVectorStyleReady() {
+    // The vector camera is safe to expose only after the maritime
+    // redaction/label layers have been installed successfully.
+    if (!mounted || widget.is3D || !_map2DSource.usesVectorStyle) return;
+    _cancelVectorStyleRecovery();
+  }
+
+  void _armVectorStyleRecovery() {
+    _vectorStyleRecoveryTimer?.cancel();
+    final ticket = _vectorStyleRecoveryGate.arm();
+    _vectorStyleRecoveryTimer = Timer(_vectorStyleRecoveryWindow, () {
+      if (!_vectorStyleRecoveryGate.consumeTimeout(ticket)) return;
+      if (!mounted || widget.is3D || !_map2DSource.usesVectorStyle) return;
+      // Keep the GPS and its complete trip route; ONLY the map base changes.
+      debugPrint('Online vector fallback unavailable; showing local GPS/sign '
+          'reference canvas without requesting map tiles');
+      setState(() {
+        ++_rasterTileEpoch;
+        _ready = false;
+        _follow = true;
+        _map2DSource = Map2DBaseSource.offlineSigns;
+        _twoDFollowGate.reset();
+      });
+    });
+  }
+
   /// A run of failed OSM raster requests is a signal to switch sources, not
   /// a signal to abandon GPS. MapLibre uses the already-configured legal
   /// OpenFreeMap vector service, only as an on-demand fallback.
@@ -172,11 +213,13 @@ class _DashboardMapState extends State<DashboardMap> {
         _ready = false;
         _map2DSource = Map2DBaseSource.vector;
       });
+      _armVectorStyleRecovery();
     });
   }
 
   void _select2DBaseMap() {
     if (widget.is3D) return;
+    _cancelVectorStyleRecovery();
     setState(() {
       // Invalidate late raster callbacks before changing the source.
       _rasterTileEpoch++;
@@ -213,6 +256,7 @@ class _DashboardMapState extends State<DashboardMap> {
 
   @override
   void dispose() {
+    _cancelVectorStyleRecovery();
     _map.dispose();
     _signMapCamera.dispose();
     super.dispose();
@@ -447,6 +491,10 @@ class _DashboardMapState extends State<DashboardMap> {
               pitchDegrees: widget.pitchDegrees,
               dark: widget.dark,
               routePoints: widget.routePoints,
+              onProtectedStyleReady:
+                (!widget.is3D && _map2DSource.usesVectorStyle)
+                    ? _onProtectedVectorStyleReady
+                    : null,
               onRoadNameChanged: widget.showCurrentRoadName
                 ? (value) {
                     if (!mounted || value == _currentRoadName) return;
