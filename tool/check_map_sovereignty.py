@@ -16,6 +16,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 POLICY = ROOT / "lib/src/ui/vietnam_map_sovereignty.dart"
+HUD = ROOT / "lib/src/ui/map_sovereignty_hud.dart"
 TWO_D = ROOT / "lib/src/ui/dashboard_map.dart"
 THREE_D = ROOT / "lib/src/ui/drive_map_3d.dart"
 TRIP_MAP = ROOT / "lib/src/ui/trip_detail_page.dart"
@@ -39,13 +40,14 @@ def assert_contains(source: str, term: str, description: str, errors: list[str])
 
 def check_source() -> list[str]:
     errors: list[str] = []
-    for path in (POLICY, TWO_D, THREE_D, TRIP_MAP, WORKFLOW, EVIDENCE):
+    for path in (POLICY, HUD, TWO_D, THREE_D, TRIP_MAP, WORKFLOW, EVIDENCE):
         if not path.is_file():
             errors.append(f"Required policy file missing: {path.relative_to(ROOT)}")
     if errors:
         return errors
 
     policy = POLICY.read_text(encoding="utf-8")
+    hud = HUD.read_text(encoding="utf-8")
     dashboard = TWO_D.read_text(encoding="utf-8")
     vector = THREE_D.read_text(encoding="utf-8")
     trip_map = TRIP_MAP.read_text(encoding="utf-8")
@@ -60,6 +62,16 @@ def check_source() -> list[str]:
                  "_restrictedLines", "geoJsonMaritimeRedactions()",
                  "maritimeRedactionZones", "redaction_only", "not_a_boundary"):
         assert_contains(policy, term, "Vietnam label sanitizer", errors)
+
+    for term in ("VietnamMapSovereignty.hoangSa",
+                 "VietnamMapSovereignty.truongSa", "IgnorePointer(",
+                 "Wrap("):
+        assert_contains(hud, term, "Persistent map label HUD", errors)
+
+    for term in ("import 'map_sovereignty_hud.dart';",
+                 "MapSovereigntyHud("):
+        assert_contains(dashboard, term, "2D/3D HUD integration", errors)
+        assert_contains(trip_map, term, "History map HUD integration", errors)
 
     for term in ("VietnamMapSovereignty.osmRasterTiles",
                  "VietnamMapSovereignty.labels", "fm.MarkerLayer(",
