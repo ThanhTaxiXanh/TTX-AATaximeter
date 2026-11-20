@@ -782,7 +782,7 @@ class DriveMap3DState extends State<DriveMap3D> {
 
   Future<void> _querySignViewport(
     gl.MapLibreMapController controller, int styleEpoch,
-    int requestEpoch, {required bool force},
+    int requestEpoch, {required bool force}
   ) async {
     if (!_styleActive(controller, styleEpoch) ||
         !_signLayersReady || requestEpoch != _signRequestEpoch) return;
