@@ -246,13 +246,11 @@ class TrafficSignMap2DState extends State<TrafficSignMap2D> {
                             label: const Text('Nhập SQLite offline từ điện thoại'),
                             onPressed: () async {
                               try {
-                                final picked = await FilePicker.platform.pickFiles(
+                                final picked = await FilePicker.pickFile(
                                   type: FileType.any,
-                                  withData: false,
-                                  allowMultiple: false,
                                 );
                                 if (picked == null) return;
-                                final filePath = picked.files.single.path;
+                                final filePath = picked.path;
                                 if (filePath == null) {
                                   throw StateError(
                                     'Không đọc được đường dẫn tệp đã chọn');
