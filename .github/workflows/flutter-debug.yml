@@ -1,4 +1,4 @@
-name: Flutter MVP Debug APK
+name: Flutter isolated QA Debug/ARM64 APK
 on:
   push:
     branches: [main, feature/flutter-taximeter-foundation]
@@ -31,8 +31,12 @@ jobs:
         run: flutter create . --platforms=android --project-name ttx_aataximeter --org vn.thanhtaxixanh
       - name: Remove auto-generated demo widget test
         run: rm -f test/widget_test.dart
-      - name: Inject GPS permissions
+      - name: Inject GPS permissions and isolated QA package ID
+        env:
+          TTX_QA_BUILD: '1'
         run: python3 tool/bootstrap_android.py
+      - name: Test QA install isolation (never overwrite production package)
+        run: python3 -m unittest discover -s tool -p 'test_android_qa_identity.py'
       - name: Resolve dependencies
         run: flutter pub get
       # Required on EVERY source change; includes map, tiles, geocoder and
@@ -48,7 +52,9 @@ jobs:
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
       - name: Build DEBUG APK (not Android Auto enabled)
         run: flutter build apk --debug
-      - name: Verify APK merged GPS foreground-service manifest
+      - name: Verify DEBUG merged manifest and QA package identity
+        env:
+          TTX_QA_BUILD: '1'
         run: python3 tool/verify_apk_manifest.py
       - name: Report original universal debug APK size
         run: |
@@ -56,7 +62,7 @@ jobs:
           cat build/debug-size.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: ttx-aataximeter-mvp-debug
+          name: ttx-driver-pro-qa-debug
           path: |
             build/app/outputs/flutter-apk/app-debug.apk
             build/debug-size.txt
@@ -67,6 +73,11 @@ jobs:
       # debug key. Never claim it is suitable for production distribution.
       - name: Build optimized Android ARM64 APK (test-only signing)
         run: flutter build apk --release --split-per-abi --target-platform android-arm64
+      - name: Verify ARM64 merged manifest and QA package identity
+        env:
+          TTX_QA_BUILD: '1'
+          TTX_APK_PATH: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+        run: python3 tool/verify_apk_manifest.py
       - name: Report ARM64 optimized APK size
         run: |
           test -f build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
@@ -78,11 +89,12 @@ jobs:
             grep -m1 'APK size:' build/debug-size.txt
             echo "Release ARM64 (test signing only):"
             grep -m1 'APK size:' build/arm64-size.txt
-            echo "Android release APK is signed with Flutter's temporary debug key; install/update compatibility with earlier APKs is not guaranteed."
+            echo "Both QA APKs use vn.thanhtaxixanh.ttx_aataximeter.qa, independently installable from production." 
+            echo "Release ARM64 QA still uses TEST-ONLY signing; updates across runners may not preserve QA app data."
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: ttx-aataximeter-arm64-optimized-test-only
+          name: ttx-driver-pro-qa-arm64-test-only
           path: |
             build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
             build/arm64-size.txt
