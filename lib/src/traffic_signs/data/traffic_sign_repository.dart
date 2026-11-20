@@ -5,9 +5,13 @@ import 'traffic_sign_query_metrics.dart';
 
 /// Read-only spatial queries; independent of taximeter/trip SQLite.
 class TrafficSignRepository {
-  TrafficSignRepository(this.database);
+  TrafficSignRepository(this.database, {this.useRtree = true});
 
   final Database database;
+  /// Some Android system SQLite builds do not compile the RTree extension.
+  /// Use a read-only bbox scan on the original rows on those devices.
+  /// Never alter the owner-supplied database to work around this capability.
+  final bool useRtree;
   final TrafficSignQueryMetrics queryMetrics = TrafficSignQueryMetrics();
   static const int maxVisibleItems = 320;
 
@@ -44,13 +48,20 @@ class TrafficSignRepository {
 
   Future<SignViewportResult> _queryViewport(
       SignViewport bounds, TrafficSignFilter filter) async {
+    // The same verified 151,228-row source supports both query plans.
+    // Only SQL's FROM/predicate changes. Point coordinates, filtering,
+    // aggregation, sign IDs and safety status remain identical.
     final args = <Object?>[
-      bounds.east, bounds.west, bounds.north, bounds.south,
+      if (useRtree) ...[
+        bounds.east, bounds.west, bounds.north, bounds.south,
+      ],
       bounds.west, bounds.east, bounds.south, bounds.north,
     ];
     final conditions = <String>[
-      'r.min_longitude <= ? AND r.max_longitude >= ?',
-      'r.min_latitude <= ? AND r.max_latitude >= ?',
+      if (useRtree) ...[
+        'r.min_longitude <= ? AND r.max_longitude >= ?',
+        'r.min_latitude <= ? AND r.max_latitude >= ?',
+      ],
       's.longitude BETWEEN ? AND ?',
       's.latitude BETWEEN ? AND ?',
     ];
@@ -61,8 +72,10 @@ class TrafficSignRepository {
       conditions.add('s.sign_type_code = ?');
       args.add(filter.typeCode);
     }
-    final from = 'FROM traffic_sign_rtree AS r '
-        'JOIN traffic_signs AS s ON s.sign_id = r.sign_id '
+    final from = (useRtree
+            ? 'FROM traffic_sign_rtree AS r '
+                'JOIN traffic_signs AS s ON s.sign_id = r.sign_id '
+            : 'FROM traffic_signs AS s ') +
         'WHERE ${conditions.join(' AND ')}';
     final countRows = await database.rawQuery(
       'SELECT COUNT(*) AS total $from', args,
