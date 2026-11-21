@@ -147,6 +147,9 @@ const bool localApprovalQaEnabled =
 
 class SignReviewStore extends ChangeNotifier {
   SignReviewStore._();
+  /// FFI/widget tests use their own isolated in-memory SQLite.
+  SignReviewStore.testing(Database database)
+      : _database = Future<Database>.value(database);
   static final SignReviewStore instance = SignReviewStore._();
 
   Future<Database>? _database;
@@ -158,7 +161,12 @@ class SignReviewStore extends ChangeNotifier {
   Future<Database> _open() async {
     final support = await getApplicationSupportDirectory();
     final filename = path.join(support.path, 'sign_moderation_v1.sqlite');
-    return openDatabase(filename, version: 1, onCreate: (db, _) async {
+    return openDatabase(filename, version: 1,
+        onCreate: (db, _) => initializeSchema(db));
+  }
+
+  /// This schema is independent of the read-only owner SQLite.
+  static Future<void> initializeSchema(DatabaseExecutor db) async {
       await db.execute('''
         CREATE TABLE reports (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -195,7 +203,6 @@ class SignReviewStore extends ChangeNotifier {
           reviewer_note TEXT NOT NULL
         )
       ''');
-    });
   }
 
   /// All proposals remain PENDING. No map mutation occurs on submission.
