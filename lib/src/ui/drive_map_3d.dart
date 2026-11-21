@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as gl;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../traffic_signs/domain/traffic_sign.dart';
+import '../traffic_signs/domain/traffic_sign_catalog.dart';
 import '../traffic_signs/data/traffic_sign_database.dart';
 import '../traffic_signs/data/traffic_sign_repository.dart';
 import '../traffic_signs/presentation/traffic_sign_details.dart';
@@ -973,7 +974,7 @@ class DriveMap3DState extends State<DriveMap3D> {
                       ),
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
-                        title: const Text('Chỉ tốc độ suy ra'),
+                        title: const Text('Chỉ biển tốc độ (mã 1)'),
                         value: chosen.speedOnly,
                         onChanged: repository == null ? null
                             : (speedOnly) => choose(
@@ -981,7 +982,8 @@ class DriveMap3DState extends State<DriveMap3D> {
                       ),
                       Row(children: [
                         const Text('Mã loại: '),
-                        DropdownButton<int?>(
+                        Expanded(child: DropdownButton<int?>(
+                          isExpanded: true,
                           value: codes.contains(chosen.typeCode)
                               ? chosen.typeCode : null,
                           dropdownColor: const Color(0xFF102438),
@@ -990,12 +992,16 @@ class DriveMap3DState extends State<DriveMap3D> {
                               value: null, child: Text('Tất cả')),
                             for (final code in codes)
                               DropdownMenuItem<int?>(
-                                value: code, child: Text('$code')),
+                                value: code,
+                                child: Text(
+                                  TrafficSignCatalog.filterTitle(code),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis)),
                           ],
                           onChanged: repository == null ? null
                               : (code) => choose(chosen.copyWith(
                                   typeCode: code, clearType: code == null)),
-                        ),
+                        )),
                       ]),
                       TextField(
                         controller: idController,
