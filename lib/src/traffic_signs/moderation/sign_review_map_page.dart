@@ -85,7 +85,8 @@ class _SignReviewMapPageState extends State<SignReviewMapPage> {
     final rawInput = TextEditingController(text: '0');
     final directionInput = TextEditingController(text: '255');
     final noteInput = TextEditingController();
-    var selected = _selection;
+    final selected = _selection;
+    int? loadedTargetId;
     try {
       // When a sign ID was selected, prefill the type/position from its
       // existing (base or approved) record. User may still edit.
@@ -94,7 +95,9 @@ class _SignReviewMapPageState extends State<SignReviewMapPage> {
         final original = await (await TrafficSignDatabase.openOptional())
             ?.byId(int.parse(idInput.text));
         if (original != null) {
-          selected = ll.LatLng(original.latitude, original.longitude);
+          loadedTargetId = original.signId;
+          // Preserve the map point chosen for the EDIT proposal; do not
+          // silently snap the report back to the existing sign location.
           typeInput.text = original.signTypeCode.toString();
           rawInput.text = original.valueRaw.toString();
           directionInput.text = original.directionRaw.toString();
@@ -129,8 +132,42 @@ class _SignReviewMapPageState extends State<SignReviewMapPage> {
                     TextField(controller: idInput,
                       keyboardType: TextInputType.number,
                       style: const TextStyle(color: Colors.white),
-                      decoration: const InputDecoration(
-                          labelText: 'sign_id cần sửa/xóa (bắt buộc)')),
+                      decoration: InputDecoration(
+                        labelText: 'sign_id cần sửa/xóa (bắt buộc)',
+                        suffixIcon: IconButton(
+                          tooltip: 'Tra cứu mã biển trước khi sửa',
+                          icon: const Icon(Icons.manage_search),
+                          onPressed: () async {
+                            try {
+                              final id = int.tryParse(idInput.text.trim());
+                              if (id == null) {
+                                throw ArgumentError('Nhập một sign_id hợp lệ');
+                              }
+                              final repository =
+                                  await TrafficSignDatabase.openOptional();
+                              final sign = await repository?.byId(id);
+                              if (sign == null) {
+                                throw StateError('Không tìm thấy sign_id');
+                              }
+                              loadedTargetId = id;
+                              typeInput.text = sign.signTypeCode.toString();
+                              rawInput.text = sign.valueRaw.toString();
+                              directionInput.text = sign.directionRaw.toString();
+                              if (sheetContext.mounted) {
+                                ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                  const SnackBar(content: Text(
+                                    'Đã tải thông tin biển. Vị trí báo cáo '
+                                    'vẫn là điểm bạn chọn trên bản đồ.')));
+                              }
+                            } catch (error) {
+                              if (sheetContext.mounted) {
+                                ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                  SnackBar(content: Text('$error')));
+                              }
+                            }
+                          },
+                        ),
+                      )),
                   TextField(controller: typeInput,
                     keyboardType: TextInputType.number,
                     style: const TextStyle(color: Colors.white),
@@ -170,6 +207,12 @@ class _SignReviewMapPageState extends State<SignReviewMapPage> {
                         if (operation != SignChangeOperation.add &&
                             target == null) {
                           throw ArgumentError('Cần sign_id gốc hợp lệ');
+                        }
+                        if (operation == SignChangeOperation.edit &&
+                            loadedTargetId != target) {
+                          throw StateError(
+                            'Bấm Tra cứu ID để nạp đúng mã/giá trị '
+                            'biển nguồn trước khi sửa');
                         }
                         var reportLocation = selected;
                         var reportCode = int.tryParse(typeInput.text.trim());
