@@ -1,13 +1,18 @@
 import 'package:sqflite/sqflite.dart';
 
 import '../domain/traffic_sign.dart';
+import '../domain/sign_approved_overlay.dart';
+import '../moderation/sign_review_store.dart';
 import 'traffic_sign_query_metrics.dart';
 
 /// Read-only spatial queries; independent of taximeter/trip SQLite.
 class TrafficSignRepository {
-  TrafficSignRepository(this.database, {this.useRtree = true});
+  TrafficSignRepository(this.database,
+      {this.useRtree = true, this.moderation});
 
   final Database database;
+  /// Null retains the original read-only behavior and simplifies FFI tests.
+  final SignReviewStore? moderation;
   /// Some Android system SQLite builds do not compile the RTree extension.
   /// Use a read-only bbox scan on the original rows on those devices.
   /// Never alter the owner-supplied database to work around this capability.
@@ -16,6 +21,11 @@ class TrafficSignRepository {
   static const int maxVisibleItems = 320;
 
   Future<TrafficSign?> byId(int signId) async {
+    if (moderation != null) {
+      final patch = await moderation!.approvedById(signId);
+      if (patch != null) return patch.deleted ? null : patch.toTrafficSign();
+    }
+    if (signId < 0) return null; // Created reports use negative IDs.
     final rows = await database.query(
       'traffic_signs', where: 'sign_id = ?', whereArgs: [signId], limit: 1,
     );
@@ -27,7 +37,13 @@ class TrafficSignRepository {
       'SELECT DISTINCT sign_type_code FROM traffic_signs '
       'ORDER BY sign_type_code',
     );
-    return rows.map((r) => r['sign_type_code'] as int).toList(growable: false);
+    final codes = rows.map((r) => r['sign_type_code'] as int).toSet();
+    if (moderation != null) {
+      for (final patch in await moderation!.approved()) {
+        if (!patch.deleted) codes.add(patch.typeCode);
+      }
+    }
+    return codes.toList()..sort();
   }
 
   /// Never allocates 151k Dart/Flutter markers. At high density, SQLite
@@ -37,7 +53,14 @@ class TrafficSignRepository {
     if (!filter.enabled || !bounds.isValid) return SignViewportResult.empty;
     final stopwatch = Stopwatch()..start();
     try {
-      final value = await _queryViewport(bounds, filter);
+      final approved = await moderation?.approved() ?? const <ApprovedSignPatch>[];
+      // A patch for an existing source ID suppresses the old source row,
+      // regardless of whether the approved action edits or deletes it.
+      final suppressed = approved.where((p) => p.signId >= 0)
+          .map((p) => p.signId).toList(growable: false);
+      final source = await _queryViewport(bounds, filter, suppressed);
+      final value = SignApprovedOverlay.merge(
+          source, approved, bounds, filter, maxMarkers: maxVisibleItems);
       queryMetrics.record(stopwatch.elapsed, succeeded: true);
       return value;
     } catch (_) {
@@ -47,7 +70,8 @@ class TrafficSignRepository {
   }
 
   Future<SignViewportResult> _queryViewport(
-      SignViewport bounds, TrafficSignFilter filter) async {
+      SignViewport bounds, TrafficSignFilter filter,
+      List<int> suppressedSignIds) async {
     // The same verified 151,228-row source supports both query plans.
     // Only SQL's FROM/predicate changes. Point coordinates, filtering,
     // aggregation, sign IDs and safety status remain identical.
@@ -65,6 +89,12 @@ class TrafficSignRepository {
       's.longitude BETWEEN ? AND ?',
       's.latitude BETWEEN ? AND ?',
     ];
+    if (suppressedSignIds.isNotEmpty) {
+      // IDs are typed integers read from our own reviewed SQLite store.
+      // The QA overlay is capped at 750 accepted records; avoid SQLite's
+      // older 999-host-parameter limit without any string input injection.
+      conditions.add('s.sign_id NOT IN (${suppressedSignIds.join(',')})');
+    }
     if (filter.speedOnly) {
       // Owner-confirmed raw speed signs only; other sign types may have
       // non-zero raw values which do NOT represent posted speed.
