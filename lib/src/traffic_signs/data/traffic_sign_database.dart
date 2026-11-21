@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'traffic_sign_repository.dart';
+import '../moderation/sign_review_store.dart';
 
 /// The source database is generated at build time, never on GPS updates.
 abstract final class TrafficSignDatabase {
@@ -55,7 +56,8 @@ abstract final class TrafficSignDatabase {
         final existing = await openDatabase(target.path, readOnly: true);
         try {
           final useRtree = await _verifyMetadata(existing);
-          return TrafficSignRepository(existing, useRtree: useRtree);
+          return TrafficSignRepository(existing,
+              useRtree: useRtree, moderation: SignReviewStore.instance);
         } catch (_) {
           await existing.close();
           rethrow;
@@ -94,7 +96,8 @@ abstract final class TrafficSignDatabase {
       }
       await _promoteChecked(temporary, target, marker);
       final installed = await openDatabase(target.path, readOnly: true);
-      return TrafficSignRepository(installed, useRtree: useRtree);
+      return TrafficSignRepository(installed,
+          useRtree: useRtree, moderation: SignReviewStore.instance);
     } finally {
       if (await temporary.exists()) await temporary.delete();
     }
@@ -129,8 +132,8 @@ abstract final class TrafficSignDatabase {
       // Old cache is never removed until the replacement has passed checks.
       await _promoteChecked(temporary, target, marker);
       final database = await openDatabase(target.path, readOnly: true);
-      final repository = TrafficSignRepository(
-        database, useRtree: useRtree);
+      final repository = TrafficSignRepository(database,
+        useRtree: useRtree, moderation: SignReviewStore.instance);
       _opened = Future.value(repository);
       return repository;
     } finally {
