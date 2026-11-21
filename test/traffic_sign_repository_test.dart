@@ -35,11 +35,11 @@ void main() {
   tearDown(() async => db.close());
 
   Future<void> add(int id, double lon, double lat,
-      {int? speed, int code = 1}) async {
+      {int? speed, int code = 1, int raw = 0}) async {
     await db.insert('traffic_signs', {
       'sign_id': id, 'longitude': lon, 'latitude': lat,
       'sign_type_code': code, 'direction_raw': 255,
-      'value_raw': 0, 'speed_kmh_inferred': speed,
+      'value_raw': raw, 'speed_kmh_inferred': speed,
       'source_dataset': 'synthetic_test_only',
       'verification_status': 'unverified',
     });
@@ -124,5 +124,24 @@ void main() {
       const SignViewport(west: 120, east: 100, south: 0, north: 10),
       const TrafficSignFilter(enabled: true));
     expect(result.total, 0);
+  });  test('owner raw speed filter ignores numeric raw camera payloads', () async {
+    await add(10, 105.8, 21.0, code: 1, raw: 80);
+    await add(11, 105.9, 21.1, code: 4, raw: 178);
+    await add(12, 106.0, 21.2, code: 50, raw: 60);
+
+    final all = await repository.viewport(
+      region, const TrafficSignFilter(enabled: true));
+    expect(all.total, 3);
+    expect(all.items.map((i) => i.signTypeCode), [1, 4, 50]);
+    expect(all.items.map((i) => i.valueRaw), [80, 178, 60]);
+
+    final onlySpeed = await repository.viewport(
+      region, const TrafficSignFilter(enabled: true, speedOnly: true));
+    expect(onlySpeed.total, 1);
+    expect(onlySpeed.items.single.signId, 10);
+    expect(onlySpeed.items.single.valueRaw, 80);
+    expect(onlySpeed.items.single.signTypeCode, 1);
   });
+
+
 }
