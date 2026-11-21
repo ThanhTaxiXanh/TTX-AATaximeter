@@ -25,8 +25,13 @@ void main() {
         0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
       ]);
       final header = ByteData.sublistView(bytes);
-      expect(header.getUint32(16), 64);
-      expect(header.getUint32(20), 64);
+      // Input PNGs have different aspect ratios. The 64px longest side
+      // is retained; distorting a road sign into a square is forbidden.
+      final width = header.getUint32(16);
+      final height = header.getUint32(20);
+      expect(width, inInclusiveRange(1, 64));
+      expect(height, inInclusiveRange(1, 64));
+      expect(width == 64 || height == 64, isTrue);
       expect(TrafficSignIconPack.mapLibreImageId(entry.key),
           'ttx-sign-icon-${entry.value}');
     }
