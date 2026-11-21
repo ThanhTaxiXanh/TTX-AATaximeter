@@ -47,7 +47,7 @@ class TrafficSignDetails extends StatelessWidget {
               const SizedBox(height: 8),
               const Text(
                 'Phân loại tạm thời theo mã chủ dữ liệu xác nhận. '
-                'Không tự dùng các giá trị này làm giới hạn tốc độ '
+                'Không dùng làm giới hạn tốc độ '
                 'pháp lý, cảnh báo an toàn hoặc tính cước.',
                 style: TextStyle(color: Colors.amberAccent, fontSize: 12),
               ),
