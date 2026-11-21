@@ -51,7 +51,7 @@ jobs:
       - name: Flutter static analysis
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
       - name: Build DEBUG APK (not Android Auto enabled)
-        run: flutter build apk --debug
+        run: flutter build apk --debug --dart-define=TTX_LOCAL_APPROVAL_QA=true
       - name: Verify DEBUG merged manifest and QA package identity
         env:
           TTX_QA_BUILD: '1'
@@ -72,7 +72,7 @@ jobs:
       # This is a TEST-ONLY release build signed using Flutter's temporary
       # debug key. Never claim it is suitable for production distribution.
       - name: Build optimized Android ARM64 APK (test-only signing)
-        run: flutter build apk --release --split-per-abi --target-platform android-arm64
+        run: flutter build apk --release --split-per-abi --target-platform android-arm64 --dart-define=TTX_LOCAL_APPROVAL_QA=true
       - name: Verify ARM64 merged manifest and QA package identity
         env:
           TTX_QA_BUILD: '1'
