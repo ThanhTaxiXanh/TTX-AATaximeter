@@ -77,7 +77,7 @@ void main() {
 
   test('filter inferred speed and filter raw type code without inference', () async {
     await add(0, 105.8, 21.0, code: 43);
-    await add(1, 106.1, 21.0, speed: 60, code: 1);
+    await add(1, 106.1, 21.0, speed: 60, code: 1, raw: 60);
     await add(2, 106.3, 21.0, code: 1);
     final inferred = await repository.viewport(
       region, const TrafficSignFilter(enabled: true, speedOnly: true));
