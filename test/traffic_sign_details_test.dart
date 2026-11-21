@@ -61,5 +61,22 @@ void main() {
     expect(find.text('Giá trị thô: 178'), findsOneWidget);
     expect(find.textContaining('Số trên biển tốc độ'), findsNothing);
   });
+  testWidgets('detail card renders the exact user-supplied pictogram', 
+      (tester) async {
+    const sign = TrafficSign(
+      signId: 2, longitude: 106.0, latitude: 21.0,
+      signTypeCode: 2, directionRaw: 255, valueRaw: 0,
+      speedKmhInferred: null,
+      sourceDataset: 'synthetic_test_only',
+      verificationStatus: 'unverified',
+    );
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(body: TrafficSignDetails(sign: sign)),
+    ));
+    expect(find.text('Loại biển: Vào khu dân cư'), findsOneWidget);
+    expect(find.byType(Image), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
 
 }
