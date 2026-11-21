@@ -58,5 +58,30 @@ void main() {
     expect(TrafficSignVectorSource.label(s), '~80');
     expect(TrafficSignVectorSource.label(unknown), '?');
     expect(TrafficSignVectorSource.label(aggregate), '151k+');
+  });  test('real raw sign categories render in native MapLibre source', () {
+    const items = <SignMapItem>[
+      SignMapItem(signId: 1, longitude: 106.0, latitude: 21.0,
+        count: 1, signTypeCode: 1, valueRaw: 80,
+        speedKmhInferred: 80),
+      SignMapItem(signId: 2, longitude: 106.01, latitude: 21.01,
+        count: 1, signTypeCode: 4, valueRaw: 178),
+      SignMapItem(signId: 3, longitude: 106.02, latitude: 21.02,
+        count: 1, signTypeCode: 32, valueRaw: 0),
+      SignMapItem(signId: 4, longitude: 106.03, latitude: 21.03,
+        count: 3),
+    ];
+    final records = (TrafficSignVectorSource.features(items)['features']
+        as List).cast<Map<String, dynamic>>();
+    expect(TrafficSignVectorSource.label(items[0]), '80');
+    expect(TrafficSignVectorSource.label(items[1]), 'CAM');
+    expect(TrafficSignVectorSource.label(items[2]), 'ĐỎ');
+    expect(TrafficSignVectorSource.label(items[3]), '3');
+    expect((records[0]['properties'] as Map)['raw_value'], 80);
+    expect((records[1]['properties'] as Map)['owner_type_label'],
+      'Camera giao thông');
+    expect((records[2]['properties'] as Map)['sign_type_code'], 32);
+    expect((records[3]['properties'] as Map)['sign_type_code'], isNull);
   });
+
+
 }
