@@ -38,10 +38,16 @@ abstract final class TrafficSignIconPack {
         .map((key, value) => MapEntry(key, value as String));
   }();
 
+  // Immutable, cached decoded sprites. Never inflate / allocate hundreds of
+  // times as the driver pans and FlutterMap rebuilds the viewport.
+  static final Map<String, Uint8List> _decodedPng = {
+    for (final entry in _pngBase64.entries)
+      entry.key: base64Decode(entry.value),
+  };
+
   static Uint8List? pngForCode(int? typeCode) {
     final key = iconKey(typeCode);
-    final encoded = key == null ? null : _pngBase64[key];
-    return encoded == null ? null : base64Decode(encoded);
+    return key == null ? null : _decodedPng[key];
   }
 
   /// Registered after maritime protection has completed on every style load.
