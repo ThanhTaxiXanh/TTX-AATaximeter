@@ -284,6 +284,63 @@ class _SignReviewMapPageState extends State<SignReviewMapPage> {
     }
   }
 
+  Future<void> _showReviewHistory() async {
+    try {
+      final records = await _store.reports();
+      if (!mounted) return;
+      await showModalBottomSheet<void>(
+        context: context, isScrollControlled: true,
+        backgroundColor: const Color(0xFF14273B),
+        builder: (sheet) => SafeArea(
+          top: false,
+          child: SizedBox(
+            height: MediaQuery.sizeOf(sheet).height * 0.72,
+            child: Column(children: [
+              const Padding(
+                padding: EdgeInsets.all(14),
+                child: Text('Nhật ký báo cáo & phê duyệt',
+                  style: TextStyle(color: Colors.white,
+                    fontSize: 17, fontWeight: FontWeight.w700)),
+              ),
+              Expanded(child: ListView.builder(
+                itemCount: records.length,
+                itemBuilder: (_, i) {
+                  final r = records[i];
+                  return ListTile(
+                    leading: Icon(switch (r.status) {
+                      'approved' => Icons.verified,
+                      'rejected' => Icons.cancel_outlined,
+                      _ => Icons.pending_outlined,
+                    }, color: r.status == 'approved'
+                        ? Colors.lightGreenAccent
+                        : r.status == 'rejected'
+                            ? Colors.redAccent : Colors.amberAccent),
+                    title: Text('#${r.id} · ${r.draft.operation.name} · '
+                        '${r.status}', style: const TextStyle(
+                          color: Colors.white)),
+                    subtitle: Text(
+                      '${TrafficSignCatalog.description(r.draft.typeCode)}\n'
+                      '${r.draft.note}\n'
+                      'Tạo: ${r.createdAt}\n'
+                      'Duyệt: ${r.reviewedAt ?? 'Chưa có'} · '
+                      '${r.reviewerNote ?? ''}',
+                      style: const TextStyle(color: Colors.white70)),
+                    isThreeLine: true,
+                  );
+                },
+              )),
+            ]),
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Không mở được lịch sử: $error')));
+      }
+    }
+  }
+
   @override
   void dispose() {
     _refreshEpoch++;
@@ -299,6 +356,11 @@ class _SignReviewMapPageState extends State<SignReviewMapPage> {
       appBar: AppBar(
         title: const Text('Quản lý biển báo & camera'),
         actions: [
+          IconButton(
+            tooltip: 'Nhật ký đã duyệt/từ chối',
+            icon: const Icon(Icons.history),
+            onPressed: () => unawaited(_showReviewHistory()),
+          ),
           IconButton(
             tooltip: _onlineTiles ? 'Tắt tile để dùng offline' : 'Bật tile',
             icon: Icon(_onlineTiles ? Icons.wifi_off : Icons.layers_outlined),
