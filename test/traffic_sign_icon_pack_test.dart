@@ -34,6 +34,9 @@ void main() {
       expect(width == 64 || height == 64, isTrue);
       expect(TrafficSignIconPack.mapLibreImageId(entry.key),
           'ttx-sign-icon-${entry.value}');
+      // Cache never allocates new Uint8List on every camera frame.
+      expect(identical(bytes, TrafficSignIconPack.pngForCode(entry.key)),
+          isTrue);
     }
     final images = TrafficSignIconPack.mapLibreImages.toList();
     expect(images.length, expected.length);
