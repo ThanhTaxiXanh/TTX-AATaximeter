@@ -773,7 +773,7 @@ class DriveMap3DState extends State<DriveMap3D> {
       try {
         for (final (imageId, png) in TrafficSignIconPack.mapLibreImages) {
           if (!_styleActive(controller, styleEpoch)) return;
-          await controller.addImage(imageId, png, false, 1.5);
+          await controller.addImage(imageId, png, false);
         }
         if (!_styleActive(controller, styleEpoch)) return;
         await controller.addSymbolLayer(
@@ -781,7 +781,7 @@ class DriveMap3DState extends State<DriveMap3D> {
           TrafficSignVectorSource.iconsId,
           const gl.SymbolLayerProperties(
             iconImage: ['get', 'icon_key'],
-            iconSize: 1.0,
+            iconSize: 0.65,
             iconAllowOverlap: true,
             iconIgnorePlacement: true,
             iconPitchAlignment: 'viewport',
