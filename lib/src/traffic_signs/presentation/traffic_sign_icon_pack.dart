@@ -134,5 +134,6 @@ abstract final class TrafficSignIconPack {
     'IfF+BJic3yoxo6hnUYNUYbipYCE/ftefpJ9ne0B3EFBtCnl2yTEJ1WgI58E8Sr+cZJ+h7zl3yTbGbay4ds+1IPf+J9YNerJp07YzifHU9O875R'
     'hYQfYnGseg7cUt3BMIYlvPAkWtglOZ4bo8fIheYcThw8PMd2IcDTjVuSliYhGQZPT3rSVlbbZ6LWl6g46krd40B1KG7NhvNBW++mTbKxqvC7cD'
     'vyMbvjt+ImGaKNVbftuBRnc1cEtCJem0lYm9Tllr2vShVO7yNbfHuvKmGM7htYwZ7gdLfoyddcNJvSQRjYPWN7oqbImSwZvCdLX3qZOLfzHctg'
-    'PU3y9bkmP1B1K1aXhPKXOJ7HGdvze1JgEJx...';
+    'PU3y9bkmP1B1K1aXhPKXOJ7HGdvze1JgGxn9HyvI/hpFR1CCMXb5vPpR4QZ70MTMmftbjVQ0Kq0es9g0GCJpvrv2oCGR2gJG6/whh+e55PTL+i'
+    'huE6aOspAc3f515+h4n8mg9xOi5KF/tcvx0anxUM1XQHHyzfVU0U8veHPvVpy9zMigaCgw5J7NKbTzgYKpRXLMGU5sriv/CRn/5/8Cehwh8w==';
 }
