@@ -113,7 +113,9 @@ def check_source() -> list[str]:
     for term in ("if (protectionReady) await _installTrafficSignLayers(",
                  "belowLayerId: 'ttx-vietnam-maritime-label-text'",
                  "onCameraIdle: () => _scheduleSignViewport()",
-                 "TrafficSignVectorSource.sourceId"):
+                 "TrafficSignVectorSource.sourceId",
+                 "TrafficSignVectorSource.iconsId",
+                 "TrafficSignIconPack.mapLibreImages"):
         assert_contains(vector, term, "MapLibre sign overlay safeguards", errors)
 
     for term in ("VietnamMapSovereignty.osmRasterTiles",

@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../data/traffic_sign_database.dart';
 import '../data/traffic_sign_repository.dart';
 import '../domain/traffic_sign.dart';
+import '../domain/traffic_sign_catalog.dart';
 import 'traffic_sign_details.dart';
 import 'traffic_sign_layer.dart';
 
@@ -284,14 +285,15 @@ class TrafficSignMap2DState extends State<TrafficSignMap2D> {
                       ),
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
-                        title: const Text('Chỉ dữ liệu tốc độ suy ra'),
+                        title: const Text('Chỉ biển tốc độ (mã 1)'),
                         value: chosen.speedOnly,
                         onChanged: repository == null ? null : (speedOnly) =>
                             choose(chosen.copyWith(speedOnly: speedOnly)),
                       ),
                       Row(children: [
                         const Text('Mã loại biển:  '),
-                        DropdownButton<int?>(
+                        Expanded(child: DropdownButton<int?>(
+                          isExpanded: true,
                           dropdownColor: const Color(0xFF102438),
                           value: codes.contains(chosen.typeCode)
                               ? chosen.typeCode : null,
@@ -300,12 +302,16 @@ class TrafficSignMap2DState extends State<TrafficSignMap2D> {
                               value: null, child: Text('Tất cả')),
                             for (final code in codes)
                               DropdownMenuItem<int?>(
-                                value: code, child: Text('$code')),
+                                value: code,
+                                child: Text(
+                                  TrafficSignCatalog.filterTitle(code),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis)),
                           ],
                           onChanged: repository == null ? null : (code) =>
                             choose(chosen.copyWith(
                               typeCode: code, clearType: code == null)),
-                        ),
+                        )),
                       ]),
                       TextField(
                         controller: controller,

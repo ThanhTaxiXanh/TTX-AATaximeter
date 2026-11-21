@@ -58,5 +58,55 @@ void main() {
     expect(TrafficSignVectorSource.label(s), '~80');
     expect(TrafficSignVectorSource.label(unknown), '?');
     expect(TrafficSignVectorSource.label(aggregate), '151k+');
+  });  test('real raw sign categories render in native MapLibre source', () {
+    const items = <SignMapItem>[
+      SignMapItem(signId: 1, longitude: 106.0, latitude: 21.0,
+        count: 1, signTypeCode: 1, valueRaw: 80,
+        speedKmhInferred: 80),
+      SignMapItem(signId: 2, longitude: 106.01, latitude: 21.01,
+        count: 1, signTypeCode: 4, valueRaw: 178),
+      SignMapItem(signId: 3, longitude: 106.02, latitude: 21.02,
+        count: 1, signTypeCode: 32, valueRaw: 0),
+      SignMapItem(signId: 4, longitude: 106.03, latitude: 21.03,
+        count: 3),
+    ];
+    final records = (TrafficSignVectorSource.features(items)['features']
+        as List).cast<Map<String, dynamic>>();
+    expect(TrafficSignVectorSource.label(items[0]), '80');
+    expect(TrafficSignVectorSource.label(items[1]), 'CAM');
+    expect(TrafficSignVectorSource.label(items[2]), 'ĐỎ');
+    expect(TrafficSignVectorSource.label(items[3]), '3');
+    expect((records[0]['properties'] as Map)['raw_value'], 80);
+    expect((records[1]['properties'] as Map)['owner_type_label'],
+      'Camera giao thông');
+    expect((records[2]['properties'] as Map)['sign_type_code'], 32);
+    expect((records[3]['properties'] as Map)['sign_type_code'], isNull);
+    expect((records[0]['properties'] as Map).containsKey('icon_key'), false);
+    expect((records[1]['properties'] as Map).containsKey('icon_key'), false);
+    expect((records[2]['properties'] as Map)['icon_key'],
+        'ttx-sign-icon-traffic_light');
+    expect((records[3]['properties'] as Map).containsKey('icon_key'), false);
   });
+
+  test('icon mapping is used only for owner-confirmed unclustered types', () {
+    const items = [
+      SignMapItem(signId: 2, longitude: 106, latitude: 21, count: 1,
+        signTypeCode: 2, valueRaw: 0),
+      SignMapItem(signId: 36, longitude: 106.1, latitude: 21.1, count: 1,
+        signTypeCode: 36, valueRaw: 0),
+      SignMapItem(signId: 50, longitude: 106.2, latitude: 21.2, count: 1,
+        signTypeCode: 50, valueRaw: 0),
+      SignMapItem(signId: 500, longitude: 106.3, latitude: 21.3, count: 12),
+    ];
+    final features = (TrafficSignVectorSource.features(items)['features']
+        as List).cast<Map<String, dynamic>>();
+    expect((features[0]['properties'] as Map)['icon_key'],
+        'ttx-sign-icon-residential_area_start');
+    expect((features[1]['properties'] as Map)['icon_key'],
+        'ttx-sign-icon-no_car_right_turn');
+    expect((features[2]['properties'] as Map).containsKey('icon_key'), false);
+    expect((features[3]['properties'] as Map).containsKey('icon_key'), false);
+  });
+
+
 }
