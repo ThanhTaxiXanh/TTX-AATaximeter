@@ -15,6 +15,7 @@ import 'vietnam_map_sovereignty.dart';
 import 'map_sovereignty_hud.dart';
 import '../traffic_signs/domain/traffic_sign.dart';
 import '../traffic_signs/presentation/traffic_sign_map_2d.dart';
+import '../traffic_signs/moderation/sign_review_map_page.dart';
 
 /// Lightweight OSM 2D map by default; native MapLibre only mounts in 3D.
 class DashboardMap extends StatefulWidget {
@@ -126,6 +127,20 @@ class _DashboardMapState extends State<DashboardMap> {
         }
       });
     }
+  }
+
+  void _openSignReviewMap({double? latitude, double? longitude}) {
+    // Map reports use the visual center, not metered GPS/billing state.
+    final vectorCenter = _activeVectorMap?.reportingCameraCenter;
+    final center = vectorCenter ?? (_ready
+        ? (_map.camera.center.latitude, _map.camera.center.longitude)
+        : (widget.latitude ?? 16.0, widget.longitude ?? 107.5));
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => SignReviewMapPage(
+        initialLatitude: latitude ?? center.$1,
+        initialLongitude: longitude ?? center.$2,
+      ),
+    ));
   }
 
   void _focusOnSign(double latitude, double longitude) {
@@ -292,6 +307,11 @@ class _DashboardMapState extends State<DashboardMap> {
         _ready = true;
         _signMapCamera.value = _map.camera;
         if (_hasFix && _follow) _map.move(_position, 15);
+      },
+      onLongPress: (tapPosition, latLng) {
+        // A long press creates a report DRAFT, not a live sign.
+        _openSignReviewMap(latitude: latLng.latitude,
+          longitude: latLng.longitude);
       },
       onPositionChanged: (camera, gesture) {
         _signMapCamera.value = camera;
@@ -563,6 +583,13 @@ class _DashboardMapState extends State<DashboardMap> {
               }
             },
             'Hiển thị và lọc biển báo offline',
+          )),
+        Positioned(left: 8, top: 147,
+          child: _button(
+            const Icon(Icons.add_location_alt_outlined,
+              color: DriverProColors.amber, size: 22),
+            () => _openSignReviewMap(),
+            'Báo vị trí biển báo/camera, sửa/xóa và duyệt',
           )),
         Positioned(right: 7, top: 48,
           child: Column(children: [
