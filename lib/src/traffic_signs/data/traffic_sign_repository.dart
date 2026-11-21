@@ -66,7 +66,9 @@ class TrafficSignRepository {
       's.latitude BETWEEN ? AND ?',
     ];
     if (filter.speedOnly) {
-      conditions.add('s.speed_kmh_inferred IS NOT NULL');
+      // Owner-confirmed raw speed signs only; other sign types may have
+      // non-zero raw values which do NOT represent posted speed.
+      conditions.add('s.sign_type_code = 1 AND s.value_raw > 0');
     }
     if (filter.typeCode != null) {
       conditions.add('s.sign_type_code = ?');
@@ -86,7 +88,8 @@ class TrafficSignRepository {
     if (total <= maxVisibleItems) {
       final rows = await database.rawQuery(
         'SELECT s.sign_id, s.longitude, s.latitude, '
-        's.speed_kmh_inferred $from ORDER BY s.sign_id', args,
+        's.sign_type_code, s.value_raw, s.speed_kmh_inferred '
+        '$from ORDER BY s.sign_id', args,
       );
       return SignViewportResult(
         total: total,
@@ -96,6 +99,8 @@ class TrafficSignRepository {
           latitude: (r['latitude'] as num).toDouble(),
           count: 1,
           speedKmhInferred: r['speed_kmh_inferred'] as int?,
+          signTypeCode: r['sign_type_code'] as int,
+          valueRaw: r['value_raw'] as int,
         )).toList(growable: false),
       );
     }
@@ -109,7 +114,11 @@ class TrafficSignRepository {
       'AVG(s.longitude) AS longitude, AVG(s.latitude) AS latitude, '
       'COUNT(*) AS total, '
       'CASE WHEN COUNT(*) = 1 THEN MAX(s.speed_kmh_inferred) '
-      'ELSE NULL END AS speed_kmh_inferred '
+      'ELSE NULL END AS speed_kmh_inferred, '
+      'CASE WHEN COUNT(*) = 1 THEN MIN(s.sign_type_code) '
+      'ELSE NULL END AS sign_type_code, '
+      'CASE WHEN COUNT(*) = 1 THEN MIN(s.value_raw) '
+      'ELSE NULL END AS value_raw '
       '$from GROUP BY '
       'CAST((s.longitude - ?) / ? AS INTEGER), '
       'CAST((s.latitude - ?) / ? AS INTEGER)',
@@ -121,6 +130,8 @@ class TrafficSignRepository {
       latitude: (r['latitude'] as num).toDouble(),
       count: (r['total'] as num).toInt(),
       speedKmhInferred: r['speed_kmh_inferred'] as int?,
+      signTypeCode: r['sign_type_code'] as int?,
+      valueRaw: r['value_raw'] as int?,
     )).toList(growable: false);
 
     // RTree GROUP BY is not a silent display truncation.
