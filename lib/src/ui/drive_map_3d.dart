@@ -55,6 +55,13 @@ class DriveMap3D extends StatefulWidget {
 }
 
 class DriveMap3DState extends State<DriveMap3D> {
+  /// Visible native camera target for placing a moderation report. It is
+  /// deliberately independent of metered GPS coordinates.
+  (double, double)? get reportingCameraCenter {
+    final target = _map?.cameraPosition?.target;
+    return target == null ? null : (target.latitude, target.longitude);
+  }
+
   gl.MapLibreMapController? _map;
   bool _styleReady = false;
   bool _routeReady = false;
