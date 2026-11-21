@@ -1,5 +1,6 @@
 import '../domain/traffic_sign.dart';
 import '../domain/traffic_sign_catalog.dart';
+import 'traffic_sign_icon_pack.dart';
 
 /// Pure conversion: only bounded RTree viewport aggregates go to MapLibre.
 /// These Point features NEVER declare legal speed limits or territorial lines.
@@ -7,6 +8,7 @@ abstract final class TrafficSignVectorSource {
   static const sourceId = 'ttx-traffic-sign-points';
   static const circlesId = 'ttx-traffic-sign-circles';
   static const labelsId = 'ttx-traffic-sign-labels';
+  static const iconsId = 'ttx-traffic-sign-icons';
 
   static String featureId(SignMapItem item) =>
       '${item.isCluster ? 'cluster' : 'sign'}_${item.signId}';
@@ -41,6 +43,9 @@ abstract final class TrafficSignVectorSource {
             'raw_value': item.isCluster ? null : item.valueRaw,
             'owner_type_label': item.isCluster || item.signTypeCode == null
                 ? null : TrafficSignCatalog.description(item.signTypeCode!),
+            if (!item.isCluster &&
+                TrafficSignIconPack.mapLibreImageId(item.signTypeCode) != null)
+              'icon_key': TrafficSignIconPack.mapLibreImageId(item.signTypeCode),
           },
           'geometry': {
             'type': 'Point',
