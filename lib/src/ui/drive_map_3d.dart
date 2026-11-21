@@ -11,6 +11,7 @@ import '../traffic_signs/data/traffic_sign_database.dart';
 import '../traffic_signs/data/traffic_sign_repository.dart';
 import '../traffic_signs/presentation/traffic_sign_details.dart';
 import '../traffic_signs/presentation/traffic_sign_vector_source.dart';
+import '../traffic_signs/presentation/traffic_sign_icon_pack.dart';
 import '../domain/trip_route_point.dart';
 import 'follow_camera_gate.dart';
 import 'navigation_camera_filter.dart';
@@ -107,7 +108,8 @@ class DriveMap3DState extends State<DriveMap3D> {
   late final gl.OnFeatureInteractionCallback _signTapCallback =
       (point, coordinates, id, layerId, annotation) {
     if (layerId != TrafficSignVectorSource.circlesId &&
-        layerId != TrafficSignVectorSource.labelsId) return;
+        layerId != TrafficSignVectorSource.labelsId &&
+        layerId != TrafficSignVectorSource.iconsId) return;
     final item = TrafficSignVectorSource.tapped(id, _signDisplayedById);
     if (item == null || !_maritimeProtectionReady ||
         !_signFilter.enabled) return;
@@ -764,6 +766,35 @@ class DriveMap3DState extends State<DriveMap3D> {
         belowLayerId: 'ttx-vietnam-maritime-label-text',
         minzoom: 3, maxzoom: 22,
       );
+      if (!_styleActive(controller, styleEpoch)) return;
+      // Images are style-scoped. Re-register every time MapLibre reloads a
+      // style, after the maritime redaction/labels are confirmed active.
+      // A native image failure must NOT remove generic circle/text markers.
+      try {
+        for (final (imageId, png) in TrafficSignIconPack.mapLibreImages) {
+          if (!_styleActive(controller, styleEpoch)) return;
+          await controller.addImage(imageId, png, false, 1.5);
+        }
+        if (!_styleActive(controller, styleEpoch)) return;
+        await controller.addSymbolLayer(
+          TrafficSignVectorSource.sourceId,
+          TrafficSignVectorSource.iconsId,
+          const gl.SymbolLayerProperties(
+            iconImage: ['get', 'icon_key'],
+            iconSize: 1.0,
+            iconAllowOverlap: true,
+            iconIgnorePlacement: true,
+            iconPitchAlignment: 'viewport',
+          ),
+          filter: ['has', 'icon_key'],
+          belowLayerId: 'ttx-vietnam-maritime-label-text',
+          minzoom: 3, maxzoom: 22,
+        );
+      } catch (error) {
+        debugPrint('Optional MapLibre icon sprite layer unavailable: $error');
+        // Keep generic symbols as the graceful fallback on Android devices
+        // where a native style fails to render dynamically registered images.
+      }
       if (!_styleActive(controller, styleEpoch)) return;
       _signLayersReady = true;
       _scheduleSignViewport(force: true);
