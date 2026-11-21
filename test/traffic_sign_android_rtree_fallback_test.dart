@@ -39,8 +39,8 @@ void main() {
       batch.insert('traffic_signs', {
         'sign_id': id, 'longitude': 105.80 + id * 0.00001,
         'latitude': 21.00 + id * 0.00001,
-        'sign_type_code': id.isEven ? 43 : 1,
-        'direction_raw': 255, 'value_raw': 0,
+        'sign_type_code': id.isEven ? 1 : 43,
+        'direction_raw': 255, 'value_raw': id.isEven ? 60 : 0,
         'speed_kmh_inferred': id.isEven ? 60 : null,
         'source_dataset': 'synthetic_test_only',
         'verification_status': 'unverified',
@@ -74,7 +74,7 @@ void main() {
     final codes = await repo.viewport(viewport,
       const TrafficSignFilter(enabled: true, typeCode: 1));
     expect(codes.total, 225);
-    expect(codes.items.every((item) => item.signId.isOdd), isTrue);
+    expect(codes.items.every((item) => item.signId.isEven), isTrue);
 
     // Raw ID and details are still retrieved from the original signed data.
     final single = await repo.byId(0);
