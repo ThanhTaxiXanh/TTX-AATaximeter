@@ -95,9 +95,13 @@ class SignMapItem {
     required this.latitude,
     required this.count,
     this.speedKmhInferred,
+    this.signTypeCode,
+    this.valueRaw,
   });
 
   final int signId, count;
+  /// Only populated for a single real sign, never a clustered aggregate.
+  final int? signTypeCode, valueRaw;
   final double longitude, latitude;
   final int? speedKmhInferred;
 
