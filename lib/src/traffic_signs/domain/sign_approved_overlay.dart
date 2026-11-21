@@ -26,7 +26,7 @@ abstract final class SignApprovedOverlay {
     final groups = <(int, int), _SignAccumulator>{};
     for (final item in all) {
       final x = ((item.longitude - bounds.west) / lonStep).floor()
-          .clamp(0, 14);
+          .clamp(0, 14).toInt();
       final y = ((item.latitude - bounds.south) / latStep).floor()
           .clamp(0, 14);
       groups.putIfAbsent((x, y), _SignAccumulator.new).add(item);
