@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../domain/traffic_sign.dart';
 import '../domain/traffic_sign_catalog.dart';
+import '../moderation/sign_review_map_page.dart';
 import 'traffic_sign_icon_pack.dart';
 
 /// These details are informative and never modify taxi fare or speed policy.
@@ -55,6 +56,20 @@ class TrafficSignDetails extends StatelessWidget {
                   : '${sign.speedKmhInferred} km/h (chưa xác minh)'),
               line('Tình trạng', 'Chưa xác minh hiệu lực thực địa'),
               line('Nguồn', sign.sourceDataset),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.report_outlined),
+                label: const Text('Báo sai vị trí / Đề xuất sửa hoặc xóa'),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => SignReviewMapPage(
+                      initialLatitude: sign.latitude,
+                      initialLongitude: sign.longitude,
+                      initialSignId: sign.signId,
+                    ),
+                  ),
+                ),
+              ),
               const SizedBox(height: 8),
               const Text(
                 'Phân loại tạm thời theo mã chủ dữ liệu xác nhận. '

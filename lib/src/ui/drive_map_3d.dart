@@ -9,6 +9,7 @@ import '../traffic_signs/domain/traffic_sign.dart';
 import '../traffic_signs/domain/traffic_sign_catalog.dart';
 import '../traffic_signs/data/traffic_sign_database.dart';
 import '../traffic_signs/data/traffic_sign_repository.dart';
+import '../traffic_signs/moderation/sign_review_store.dart';
 import '../traffic_signs/presentation/traffic_sign_details.dart';
 import '../traffic_signs/presentation/traffic_sign_vector_source.dart';
 import '../traffic_signs/presentation/traffic_sign_icon_pack.dart';
@@ -54,6 +55,13 @@ class DriveMap3D extends StatefulWidget {
 }
 
 class DriveMap3DState extends State<DriveMap3D> {
+  /// Visible native camera target for placing a moderation report. It is
+  /// deliberately independent of metered GPS coordinates.
+  (double, double)? get reportingCameraCenter {
+    final target = _map?.cameraPosition?.target;
+    return target == null ? null : (target.latitude, target.longitude);
+  }
+
   gl.MapLibreMapController? _map;
   bool _styleReady = false;
   bool _routeReady = false;
@@ -141,6 +149,7 @@ class DriveMap3DState extends State<DriveMap3D> {
   @override
   void initState() {
     super.initState();
+    SignReviewStore.instance.addListener(_onApprovedSignChanged);
     unawaited(_loadTrafficSigns());
   }
 
@@ -805,6 +814,11 @@ class DriveMap3DState extends State<DriveMap3D> {
     }
   }
 
+  void _onApprovedSignChanged() {
+    _lastSignCoverage = null;
+    _scheduleSignViewport(force: true);
+  }
+
   void _scheduleSignViewport({bool force = false}) {
     _signQueryTimer?.cancel();
     final controller = _map;
@@ -1244,6 +1258,7 @@ class DriveMap3DState extends State<DriveMap3D> {
 
   @override
   void dispose() {
+    SignReviewStore.instance.removeListener(_onApprovedSignChanged);
     _signRequestEpoch++;
     _signQueryTimer?.cancel();
     _map?.onFeatureTapped.remove(_signTapCallback);

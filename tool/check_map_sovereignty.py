@@ -118,6 +118,18 @@ def check_source() -> list[str]:
                  "TrafficSignIconPack.mapLibreImages"):
         assert_contains(vector, term, "MapLibre sign overlay safeguards", errors)
 
+    # The independent crowdsourced sign/report manager must never bypass
+    # app-owned labels or maritime redaction, even in local offline QA mode.
+    review_map = ROOT / "lib/src/traffic_signs/moderation/sign_review_map_page.dart"
+    if not review_map.is_file():
+        errors.append("Missing independent sign-review map")
+    else:
+        review_source = review_map.read_text(encoding="utf-8")
+        for term in ("MapSovereigntyHud()", "VietnamMapSovereignty.labels",
+                     "maritimeRedactionZones", "fm.PolygonLayer(",
+                     "fm.MarkerLayer(", "VietnamMapSovereignty.osmRasterTiles"):
+            assert_contains(review_source, term, "Sign moderation map", errors)
+
     for term in ("VietnamMapSovereignty.osmRasterTiles",
                  "VietnamMapSovereignty.labels", "MarkerLayer(",
                  "PolygonLayer(", "maritimeRedactionZones",

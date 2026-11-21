@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/traffic_sign_database.dart';
 import '../data/traffic_sign_repository.dart';
+import '../moderation/sign_review_store.dart';
 import '../domain/traffic_sign.dart';
 import '../domain/traffic_sign_catalog.dart';
 import 'traffic_sign_details.dart';
@@ -47,6 +48,7 @@ class TrafficSignMap2DState extends State<TrafficSignMap2D> {
   void initState() {
     super.initState();
     widget.camera.addListener(_scheduleViewport);
+    SignReviewStore.instance.addListener(_scheduleViewport);
     unawaited(_openDatabase());
   }
 
@@ -361,6 +363,7 @@ class TrafficSignMap2DState extends State<TrafficSignMap2D> {
 
   @override
   void dispose() {
+    SignReviewStore.instance.removeListener(_scheduleViewport);
     widget.camera.removeListener(_scheduleViewport);
     _queryTimer?.cancel();
     _queryEpoch++;
