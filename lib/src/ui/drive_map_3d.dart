@@ -13,6 +13,7 @@ import 'route_render_geometry.dart';
 import 'road_query_gate.dart';
 import 'map_style_epoch.dart';
 import 'vietnam_map_sovereignty.dart';
+import '../traffic_signs/presentation/traffic_sign_maplibre_overlay.dart';
 
 /// GPS arrow is a native geo-referenced symbol, not a fixed HUD overlay.
 /// Native MapLibre vector map with pitch, heading-up camera and OSM buildings.
@@ -74,6 +75,7 @@ class DriveMap3DState extends State<DriveMap3D> {
   final MapStyleEpoch _styleEpoch = MapStyleEpoch();
   bool _maritimeProtectionReady = false;
   bool _roadQueryBusy = false;
+  TrafficSignMapLibreOverlay? _trafficSigns;
 
   bool _styleActive(gl.MapLibreMapController controller, int epoch) =>
       mounted && _styleReady && identical(_map, controller) &&
@@ -594,6 +596,8 @@ class DriveMap3DState extends State<DriveMap3D> {
     final controller = _map;
     if (controller == null || !mounted) return;
     final epoch = _styleEpoch.begin();
+    _trafficSigns?.dispose();
+    _trafficSigns = null;
     _maritimeProtectionReady = false;
     _styleReady = true;
     _routeRenderTimer?.cancel();
@@ -642,6 +646,11 @@ class DriveMap3DState extends State<DriveMap3D> {
     if (mounted) {
       setState(() => _maritimeProtectionReady = protectionReady);
     }
+    // Reuse the same verified, read-only SQLite sign repository as raster
+    // 2D. The overlay is optional and queries only the visible map bounds.
+    final trafficSigns = TrafficSignMapLibreOverlay(controller);
+    _trafficSigns = trafficSigns;
+    unawaited(trafficSigns.install());
     try {
       await controller.addGeoJsonSource('ttx-route', _routeGeoJson());
       if (!_styleActive(controller, epoch)) return;
@@ -701,6 +710,8 @@ class DriveMap3DState extends State<DriveMap3D> {
 
   @override
   void dispose() {
+    _trafficSigns?.dispose();
+    _trafficSigns = null;
     _styleEpoch.dispose();
     _routeRenderTimer?.cancel();
     _routeRenderTimer = null;
@@ -736,6 +747,7 @@ class DriveMap3DState extends State<DriveMap3D> {
         _map = controller;
       },
       onStyleLoadedCallback: () => unawaited(_onStyleLoaded()),
+      onCameraIdle: () => _trafficSigns?.scheduleRefresh(),
     ),
     ),
     if (!_maritimeProtectionReady)
